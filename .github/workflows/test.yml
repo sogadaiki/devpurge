@@ -1,0 +1,30 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: |
+          chmod +x bin/devpurge
+          chmod +x test/run_tests.sh
+
+      - name: Run tests
+        run: bash test/run_tests.sh
+
+      - name: Verify --help
+        run: ./bin/devpurge --help
+
+      - name: Verify --version
+        run: ./bin/devpurge --version
+
+      - name: Verify dry run
+        run: ./bin/devpurge --dry-run --no-color

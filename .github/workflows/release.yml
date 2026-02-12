@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          chmod +x bin/devpurge test/run_tests.sh
+          bash test/run_tests.sh
+
+      - name: Create tarball
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          tar -czf "devpurge-${VERSION}.tar.gz" \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='test' \
+            bin/ lib/ install.sh LICENSE README.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: devpurge-*.tar.gz
+          generate_release_notes: true

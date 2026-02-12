@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# devpurge - Purge hidden dev caches on macOS
+# https://github.com/sogadaiki/devpurge
+#
+# Usage: devpurge [OPTIONS]
+# Run 'devpurge --help' for details.
+
+set -euo pipefail
+
+# ── Resolve script location ──────────────────────────────────────────────────
+DEVPURGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ── Load libraries ───────────────────────────────────────────────────────────
+# shellcheck source=../lib/utils.sh
+source "${DEVPURGE_DIR}/lib/utils.sh"
+# shellcheck source=../lib/paths.sh
+source "${DEVPURGE_DIR}/lib/paths.sh"
+# shellcheck source=../lib/scan.sh
+source "${DEVPURGE_DIR}/lib/scan.sh"
+# shellcheck source=../lib/report.sh
+source "${DEVPURGE_DIR}/lib/report.sh"
+# shellcheck source=../lib/cleanup.sh
+source "${DEVPURGE_DIR}/lib/cleanup.sh"
+# shellcheck source=../lib/share.sh
+source "${DEVPURGE_DIR}/lib/share.sh"
+
+# ── Defaults ─────────────────────────────────────────────────────────────────
+OPT_DRY_RUN=0
+OPT_ALL=0
+OPT_YES=0
+OPT_SHARE=0
+OPT_AI_ONLY=0
+
+# ── Parse arguments ──────────────────────────────────────────────────────────
+show_help() {
+  cat <<'HELP'
+devpurge - Purge hidden dev caches on macOS
+
+USAGE
+  devpurge [OPTIONS]
+
+OPTIONS
+  -n, --dry-run     Scan only, don't delete anything
+  -a, --all         Include caution-level caches (Notion, Discord, Slack, etc.)
+  -y, --yes         Skip confirmation prompt
+  -s, --share       Generate share text after cleanup
+      --ai-only     Scan AI-era caches only (Claude, Cursor, uv, etc.)
+      --no-color    Disable colored output
+  -v, --version     Show version
+  -h, --help        Show this help
+
+EXAMPLES
+  devpurge                  # Scan & clean dev caches (interactive)
+  devpurge -n               # Dry run - just show what's there
+  devpurge -y -s            # Auto-confirm + share results
+  devpurge --ai-only -n     # Check AI tool caches only
+  devpurge -a               # Include Notion/Discord/Slack caches
+
+CACHE TIERS
+  AI-Era   Claude Desktop, Cursor, uv, Playwright, Puppeteer, Bun
+  DevTool  npm, Homebrew, Chrome, VS Code, pip, Cargo, Gradle, Xcode
+  Caution  Notion, Discord, Slack, Adobe, Steam (--all to include)
+
+MORE INFO
+  https://github.com/sogadaiki/devpurge
+HELP
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -n|--dry-run)   OPT_DRY_RUN=1; shift ;;
+    -a|--all)       OPT_ALL=1; shift ;;
+    -y|--yes)       OPT_YES=1; shift ;;
+    -s|--share)     OPT_SHARE=1; shift ;;
+    --ai-only)      OPT_AI_ONLY=1; shift ;;
+    --no-color)     export DEVPURGE_NO_COLOR=1; shift ;;
+    -v|--version)   echo "devpurge ${DEVPURGE_VERSION}"; exit 0 ;;
+    -h|--help)      show_help; exit 0 ;;
+    *)
+      dp_error "Unknown option: $1"
+      dp_error "Run 'devpurge --help' for usage."
+      exit 1
+      ;;
+  esac
+done
+
+# Re-source utils if --no-color was set (to update color variables)
+if [[ "${DEVPURGE_NO_COLOR:-}" == "1" ]]; then
+  source "${DEVPURGE_DIR}/lib/utils.sh"
+fi
+
+# ── macOS check ──────────────────────────────────────────────────────────────
+if [[ "$(uname)" != "Darwin" ]]; then
+  dp_error "devpurge is designed for macOS only."
+  exit 1
+fi
+
+# ── Banner ───────────────────────────────────────────────────────────────────
+printf "\n"
+dp_bold "  devpurge v${DEVPURGE_VERSION}"
+dp_dim "  Purge hidden dev caches on macOS"
+printf "\n"
+
+# ── Phase 1: Scan ────────────────────────────────────────────────────────────
+scan_mode="default"
+if [[ $OPT_AI_ONLY -eq 1 ]]; then
+  scan_mode="ai"
+elif [[ $OPT_ALL -eq 1 ]]; then
+  scan_mode="all"
+fi
+
+devpurge_scan "$scan_mode"
+
+# ── Phase 2: Report ──────────────────────────────────────────────────────────
+if ! devpurge_report; then
+  exit 0
+fi
+
+# ── Dry run: stop here ───────────────────────────────────────────────────────
+if [[ $OPT_DRY_RUN -eq 1 ]]; then
+  dp_dim "  Dry run mode - nothing was deleted."
+  dp_dim "  Run without -n to clean up."
+  printf "\n"
+  exit 0
+fi
+
+# ── Phase 3: Confirm ─────────────────────────────────────────────────────────
+selection="all"
+
+if [[ $OPT_YES -eq 0 ]]; then
+  printf "\n"
+  printf "  ${CLR_BOLD}Delete these caches?${CLR_RESET}\n"
+  printf "\n"
+  printf "  ${CLR_BOLD}1${CLR_RESET}) Delete all listed items\n"
+  printf "  ${CLR_BOLD}2${CLR_RESET}) Select specific IDs (e.g. A01,A04,D02)\n"
+  printf "  ${CLR_BOLD}3${CLR_RESET}) Cancel\n"
+  printf "\n"
+  printf "  Choice [1-3]: "
+  read -r choice
+
+  case "$choice" in
+    1|"")
+      selection="all"
+      ;;
+    2)
+      printf "  Enter IDs (comma-separated): "
+      read -r selection
+      if [[ -z "$selection" ]]; then
+        dp_warn "  No IDs entered. Cancelled."
+        exit 0
+      fi
+      ;;
+    3)
+      dp_info "  Cancelled. Nothing was deleted."
+      exit 0
+      ;;
+    *)
+      dp_info "  Cancelled. Nothing was deleted."
+      exit 0
+      ;;
+  esac
+fi
+
+# ── Phase 4: Execute ─────────────────────────────────────────────────────────
+devpurge_cleanup "$selection"
+devpurge_cleanup_summary
+
+# ── Phase 5: Share ───────────────────────────────────────────────────────────
+if [[ $OPT_SHARE -eq 1 && $CLEANUP_DELETED -gt 0 ]]; then
+  devpurge_share
+elif [[ $CLEANUP_DELETED -gt 0 ]]; then
+  printf "  ${CLR_DIM}Tip: Run with --share to generate a shareable summary${CLR_RESET}\n"
+  printf "\n"
+fi
