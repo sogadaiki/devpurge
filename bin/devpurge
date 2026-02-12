@@ -7,8 +7,14 @@
 
 set -euo pipefail
 
-# ── Resolve script location ──────────────────────────────────────────────────
-DEVPURGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# ── Resolve script location (follows symlinks for Homebrew) ──────────────────
+DEVPURGE_SCRIPT="${BASH_SOURCE[0]}"
+while [[ -L "$DEVPURGE_SCRIPT" ]]; do
+  DEVPURGE_LINK_DIR="$(cd "$(dirname "$DEVPURGE_SCRIPT")" && pwd)"
+  DEVPURGE_SCRIPT="$(readlink "$DEVPURGE_SCRIPT")"
+  [[ "$DEVPURGE_SCRIPT" != /* ]] && DEVPURGE_SCRIPT="${DEVPURGE_LINK_DIR}/${DEVPURGE_SCRIPT}"
+done
+DEVPURGE_DIR="$(cd "$(dirname "$DEVPURGE_SCRIPT")/.." && pwd)"
 
 # ── Load libraries ───────────────────────────────────────────────────────────
 # shellcheck source=../lib/utils.sh
