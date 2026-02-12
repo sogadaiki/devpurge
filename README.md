@@ -35,18 +35,11 @@ $ devpurge -n
 
 ## Real Results
 
-On one machine, devpurge recovered **9.2GB** that CleanMyMac couldn't see:
+On one machine, **45GB recovered** — from 221GB down to 176GB:
 
-| Before | After |
+| Before (221 GB used) | After (176 GB used) |
 |--------|-------|
-| ![System Data: 72.1GB](docs/images/before-cleanup.png) | ![System Data: 62.9GB](docs/images/after-cleanup-final.png) |
-| System Data: **72.1 GB** | System Data: **62.9 GB** |
-
-CleanMyMac found 3GB of generic junk. devpurge found an additional 2.8GB of hidden dev caches — Claude Desktop VM bundles, Playwright browsers, uv Python cache — that no other tool even knows about.
-
-| CleanMyMac result | What it missed |
-|-------------------|----------------|
-| ![CleanMyMac: 3GB](docs/images/cleanmymac-05-results.png) | Claude Desktop, Cursor, uv, Playwright, Bun, Puppeteer — **invisible to CleanMyMac** |
+| ![Before: 221GB](docs/images/before-cleanup.png) | ![After: 176GB](docs/images/after-cleanup-final.png) |
 
 ## Install
 
