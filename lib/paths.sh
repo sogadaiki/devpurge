@@ -33,6 +33,8 @@ DEVPURGE_PATHS+=(
   "D13|${HOME}/.cache/pip|dev|pip cache (Linux-style)"
   "D14|${HOME}/Library/Developer/Xcode/Archives|dev|Xcode archives"
   "D15|${HOME}/.cache/chrome-devtools-mcp|dev|Chrome DevTools MCP cache"
+  "D16|${HOME}/Library/Application Support/Adobe/Common/Media Cache Files|dev|Adobe media cache"
+  "D17|${HOME}/Library/Caches/Adobe|dev|Adobe app caches"
 )
 
 # ── Tier 3: Caution (--all to enable) ────────────────────────────────────────
@@ -40,10 +42,8 @@ DEVPURGE_PATHS+=(
   "C01|${HOME}/Library/Application Support/Notion|caution|Notion local data"
   "C02|${HOME}/Library/Application Support/discord/Cache|caution|Discord cache"
   "C03|${HOME}/Library/Application Support/Slack/Cache|caution|Slack cache"
-  "C04|${HOME}/Library/Logs/Adobe|caution|Adobe CC logs"
-  "C05|${HOME}/Library/Logs/CreativeCloud|caution|Creative Cloud logs"
-  "C06|${HOME}/Library/Application Support/Wondershare Filmora Mac|caution|Filmora cache"
-  "C07|${HOME}/Library/Application Support/Steam/appcache|caution|Steam app cache"
+  "C04|${HOME}/Library/Application Support/Wondershare Filmora Mac|caution|Filmora cache"
+  "C05|${HOME}/Library/Application Support/Steam/appcache|caution|Steam app cache"
 )
 
 # ── Whitelist: only these path prefixes are allowed for deletion ──────────────
@@ -52,6 +52,7 @@ DEVPURGE_WHITELIST=(
   "${HOME}/Library/Caches/"
   "${HOME}/Library/Logs/"
   "${HOME}/Library/Developer/"
+  "${HOME}/Library/Group Containers/"
   "${HOME}/.npm/"
   "${HOME}/.cache/"
   "${HOME}/.bun/"
