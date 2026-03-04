@@ -1,6 +1,6 @@
 # devpurge
 
-> Purge hidden dev caches on macOS. Reclaim GBs from Claude Desktop, Cursor, uv, Playwright, Bun, and 20+ more.
+> Purge hidden dev caches on macOS. Reclaim GBs from Claude Desktop, Cursor, node_modules, uv, Playwright, Bun, and 30+ more.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Cleaned with devpurge](https://img.shields.io/badge/cleaned_with-devpurge-00cc88)](https://github.com/sogadaiki/devpurge)
@@ -16,21 +16,22 @@ Your Mac's "System Data" keeps growing. Tools like CleanMyMac have no idea what 
 ```
 $ devpurge -n
 
-  devpurge v0.1.0
+  devpurge v0.2.0
   Purge hidden dev caches on macOS
 
   Scanning cache directories...
 
   #     Tier      Size      Description
   ──    ────────  ────────  ───────────────────────────────────
+  N01   Project   6.3G      node_modules (my-app)
+  N02   Project   2.1G      node_modules (dashboard)
   A04   AI-Era    4.2G      uv Python cache
   A01   AI-Era    1.8G      Claude Desktop VM bundles
-  A05   AI-Era    1.2G      Playwright browsers
   D10   DevTool   3.1G      Xcode DerivedData
   D01   DevTool   890M      npm cache
-  D02   DevTool   650M      Homebrew downloads
+  D21   DevTool   302M      npm npx cache
 
-  Total reclaimable: 11.8G
+  Total reclaimable: 18.7G
 ```
 
 ## Real Results
@@ -97,6 +98,14 @@ devpurge -a
 
 ## Cache Targets
 
+### Project (v0.2.0 new)
+
+| ID | Target | Typical Size |
+|----|--------|-------------|
+| N01+ | node_modules in your projects | 1GB - 10GB+ |
+
+Automatically scans `~/Desktop`, `~/Documents`, `~/Projects`, `~/Developer`, etc. for `node_modules` directories. Recoverable with `npm install`.
+
 ### AI-Era (no other tool covers these)
 
 | ID | Target | Typical Size |
@@ -111,11 +120,11 @@ devpurge -a
 
 ### Standard Dev Tools
 
-npm, Homebrew, Chrome, VS Code, pip, Cargo, Gradle, Maven, Xcode DerivedData, iOS Simulator, Go build cache.
+npm, Homebrew, Chrome (browser cache + Service Workers + IndexedDB), VS Code, pip, Cargo, Gradle, Maven, Xcode DerivedData, iOS Simulator, Go build cache, npm npx cache, system logs, Adobe media cache.
 
 ### Caution (use `--all`)
 
-Notion, Discord, Slack, Adobe CC logs, Creative Cloud, Filmora, Steam.
+Notion, Discord, Slack, Adobe Fonts, Adobe CoreSync, Filmora, Steam.
 
 ## vs CleanMyMac / OnyX / Other Tools
 
@@ -124,6 +133,7 @@ Notion, Discord, Slack, Adobe CC logs, Creative Cloud, Filmora, Steam.
 | Claude Desktop cache | Yes | No | No |
 | Cursor IDE cache | Yes | No | No |
 | uv / Bun / Playwright | Yes | No | No |
+| node_modules auto-scan | Yes | No | No |
 | Xcode DerivedData | Yes | Yes | Yes |
 | npm / pip / Cargo | Yes | Partial | No |
 | Free & open source | Yes | No ($35/yr) | Yes |
@@ -132,7 +142,8 @@ Notion, Discord, Slack, Adobe CC logs, Creative Cloud, Filmora, Steam.
 
 ## Safety
 
-- Only deletes paths from a hardcoded whitelist — no dynamic path discovery
+- Static targets are limited to a hardcoded whitelist
+- node_modules scanning is dynamic but restricted to `$HOME` and whitelisted by path pattern
 - Never uses `sudo`
 - Permission errors are skipped, not forced
 - All paths are absolute and double-quoted
