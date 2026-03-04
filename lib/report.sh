@@ -20,6 +20,7 @@ devpurge_report() {
   local ai_bytes=0
   local dev_bytes=0
   local caution_bytes=0
+  local project_bytes=0
 
   for entry in "${SCAN_RESULTS[@]}"; do
     local id path tier desc size_human size_bytes
@@ -31,6 +32,7 @@ devpurge_report() {
       ai)      ai_bytes=$((ai_bytes + ${size_bytes%.*})) ;;
       dev)     dev_bytes=$((dev_bytes + ${size_bytes%.*})) ;;
       caution) caution_bytes=$((caution_bytes + ${size_bytes%.*})) ;;
+      project) project_bytes=$((project_bytes + ${size_bytes%.*})) ;;
     esac
 
     local tier_display
@@ -52,6 +54,9 @@ devpurge_report() {
   fi
   if [[ $caution_bytes -gt 0 ]]; then
     printf "  $(tier_label caution) : ${CLR_BOLD}%s${CLR_RESET}\n" "$(bytes_to_human $caution_bytes)"
+  fi
+  if [[ $project_bytes -gt 0 ]]; then
+    printf "  $(tier_label project) : ${CLR_BOLD}%s${CLR_RESET}\n" "$(bytes_to_human $project_bytes)"
   fi
 
   printf "\n"

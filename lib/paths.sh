@@ -35,6 +35,11 @@ DEVPURGE_PATHS+=(
   "D15|${HOME}/.cache/chrome-devtools-mcp|dev|Chrome DevTools MCP cache"
   "D16|${HOME}/Library/Application Support/Adobe/Common/Media Cache Files|dev|Adobe media cache"
   "D17|${HOME}/Library/Caches/Adobe|dev|Adobe app caches"
+  "D18|${HOME}/Library/Application Support/Google/Chrome/Default/Service Worker|dev|Chrome Service Workers"
+  "D19|${HOME}/Library/Application Support/Google/Chrome/Default/File System|dev|Chrome File System"
+  "D20|${HOME}/Library/Application Support/Google/Chrome/Default/IndexedDB|dev|Chrome IndexedDB"
+  "D21|${HOME}/.npm/_npx|dev|npm npx cache"
+  "D22|${HOME}/Library/Logs|dev|System & app logs"
 )
 
 # ── Tier 3: Caution (--all to enable) ────────────────────────────────────────
@@ -44,6 +49,8 @@ DEVPURGE_PATHS+=(
   "C03|${HOME}/Library/Application Support/Slack/Cache|caution|Slack cache"
   "C04|${HOME}/Library/Application Support/Wondershare Filmora Mac|caution|Filmora cache"
   "C05|${HOME}/Library/Application Support/Steam/appcache|caution|Steam app cache"
+  "C06|${HOME}/Library/Application Support/Adobe/Fonts|caution|Adobe font sync"
+  "C07|${HOME}/Library/Application Support/Adobe/CoreSync|caution|Adobe CoreSync"
 )
 
 # ── Whitelist: only these path prefixes are allowed for deletion ──────────────
@@ -70,5 +77,9 @@ devpurge_path_allowed() {
       "$prefix"*) return 0 ;;
     esac
   done
+  # Allow node_modules under $HOME
+  case "$target" in
+    "${HOME}/"*/node_modules) return 0 ;;
+  esac
   return 1
 }

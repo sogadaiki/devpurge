@@ -57,6 +57,7 @@ assert_exit_code() {
 
 # ── Source libraries ──────────────────────────────────────────────────────────
 export DEVPURGE_NO_COLOR=1
+export DEVPURGE_SKIP_NODE_MODULES=1
 source "${PROJECT_DIR}/lib/utils.sh"
 source "${PROJECT_DIR}/lib/paths.sh"
 source "${PROJECT_DIR}/lib/scan.sh"
@@ -86,6 +87,7 @@ assert_eq "urlencode special" "hello%23world" "$(urlencode 'hello#world')"
 assert_eq "tier_label_plain ai" "AI-Era" "$(tier_label_plain ai)"
 assert_eq "tier_label_plain dev" "DevTool" "$(tier_label_plain dev)"
 assert_eq "tier_label_plain caution" "Caution" "$(tier_label_plain caution)"
+assert_eq "tier_label_plain project" "Project" "$(tier_label_plain project)"
 
 # ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== test_paths ===\n\n"
@@ -105,6 +107,10 @@ fi
 assert_exit_code "whitelist allows Library/Caches" 0 devpurge_path_allowed "${HOME}/Library/Caches/test"
 assert_exit_code "whitelist allows .cache" 0 devpurge_path_allowed "${HOME}/.cache/test"
 assert_exit_code "whitelist allows .npm" 0 devpurge_path_allowed "${HOME}/.npm/test"
+
+# Whitelist allows node_modules under $HOME
+assert_exit_code "whitelist allows node_modules" 0 devpurge_path_allowed "${HOME}/Desktop/myproject/node_modules"
+assert_exit_code "whitelist allows nested node_modules" 0 devpurge_path_allowed "${HOME}/Documents/work/app/node_modules"
 
 # Whitelist blocks unknown paths
 assert_exit_code "whitelist blocks Desktop" 1 devpurge_path_allowed "${HOME}/Desktop/test"
@@ -187,7 +193,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.1.0" "$version_output"
+assert_contains "version output" "devpurge 0.2.0" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)

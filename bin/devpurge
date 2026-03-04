@@ -65,6 +65,7 @@ EXAMPLES
 CACHE TIERS
   AI-Era   Claude Desktop, Cursor, uv, Playwright, Puppeteer, Bun
   DevTool  npm, Homebrew, Chrome, VS Code, pip, Cargo, Gradle, Xcode
+  Project  node_modules in development projects (npm install で復元)
   Caution  Notion, Discord, Slack, Adobe, Steam (--all to include)
 
 MORE INFO
