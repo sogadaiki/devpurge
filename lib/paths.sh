@@ -15,7 +15,7 @@ DEVPURGE_PATHS+=(
   "A06|${HOME}/.cache/puppeteer|ai|Puppeteer browsers"
   "A07|${HOME}/.bun/install/cache|ai|Bun package cache"
   "A08|${HOME}/.codeium|ai|Codeium AI cache"
-  "A09|${HOME}/.claude/cache|ai|Claude Code CLI cache"
+  "A09|${HOME}/Library/Caches/claude-cli-nodejs|ai|Claude Code CLI cache"
   "A10|${HOME}/Library/Application Support/Kiro|ai|Kiro IDE cache"
 )
 
@@ -43,10 +43,10 @@ DEVPURGE_PATHS+=(
   "D20|${HOME}/Library/Application Support/Google/Chrome/Default/IndexedDB|dev|Chrome IndexedDB"
   "D21|${HOME}/.npm/_npx|dev|npm npx cache"
   "D22|${HOME}/Library/Logs|dev|System & app logs"
-  "D23|${HOME}/.dotslash_cache|dev|dotslash binary cache"
+  "D23|${HOME}/Library/Caches/dotslash|dev|dotslash binary cache"
   "D24|${HOME}/Library/Caches/pypoetry|dev|Poetry cache"
-  "D25|${HOME}/.cache/node-gyp|dev|node-gyp cache"
-  "D26|${HOME}/.next-swc|dev|next-swc cache"
+  "D25|${HOME}/Library/Caches/node-gyp|dev|node-gyp cache"
+  "D26|${HOME}/Library/Caches/next-swc|dev|next-swc cache"
   "D27|${HOME}/.cargo/registry/src|dev|Cargo registry source"
 )
 
@@ -78,9 +78,6 @@ DEVPURGE_WHITELIST=(
   "${HOME}/.gradle/"
   "${HOME}/.m2/"
   "${HOME}/.codeium/"
-  "${HOME}/.claude/cache/"
-  "${HOME}/.dotslash_cache/"
-  "${HOME}/.next-swc/"
 )
 
 # Verify a path is on the whitelist
