@@ -110,8 +110,9 @@ devpurge --exclude ~/Projects/app1/node_modules --exclude ~/Projects/app2/node_m
 | ID | Target | Typical Size |
 |----|--------|-------------|
 | N01+ | node_modules in your projects | 1GB - 10GB+ |
+| X01+ | .next build caches in your projects | 100MB - 2GB+ |
 
-Automatically scans `~/Desktop`, `~/Documents`, `~/Projects`, `~/Developer`, etc. for `node_modules` directories. Recoverable with `npm install`.
+Automatically scans `~/Desktop`, `~/Documents`, `~/Projects`, `~/Developer`, etc. Recoverable with `npm install` / `npm run build`.
 
 ### AI-Era (no other tool covers these)
 
@@ -124,14 +125,17 @@ Automatically scans `~/Desktop`, `~/Documents`, `~/Projects`, `~/Developer`, etc
 | A05 | Playwright browsers | 500MB - 2GB |
 | A06 | Puppeteer browsers | 500MB - 2GB |
 | A07 | Bun package cache | 200MB - 2GB |
+| A08 | Codeium AI cache | 200MB - 1GB |
+| A09 | Claude Code CLI cache | 10MB - 200MB |
+| A10 | Kiro IDE cache | 200MB - 1GB |
 
 ### Standard Dev Tools
 
-npm, Homebrew, Chrome (browser cache + Service Workers + IndexedDB), VS Code, pip, Cargo, Gradle, Maven, Xcode DerivedData, iOS Simulator, Go build cache, npm npx cache, system logs, Adobe media cache.
+npm, Homebrew, Chrome (browser cache + Service Workers + IndexedDB), VS Code, pip, Cargo (registry + source), Gradle, Maven, Xcode DerivedData, iOS Simulator, Go build cache, npm npx cache, system logs, Adobe media cache, dotslash, Poetry, node-gyp, next-swc.
 
 ### Caution (use `--all`)
 
-Notion, Discord, Slack, Adobe Fonts, Adobe CoreSync, Filmora, Steam.
+Notion, Discord, Slack, Adobe Fonts, Adobe CoreSync, Filmora, Steam, Zoom, Chatwork, Telegram.
 
 ## vs CleanMyMac / OnyX / Other Tools
 
@@ -140,7 +144,8 @@ Notion, Discord, Slack, Adobe Fonts, Adobe CoreSync, Filmora, Steam.
 | Claude Desktop cache | Yes | No | No |
 | Cursor IDE cache | Yes | No | No |
 | uv / Bun / Playwright | Yes | No | No |
-| node_modules auto-scan | Yes | No | No |
+| Codeium / Kiro / Claude Code | Yes | No | No |
+| node_modules + .next auto-scan | Yes | No | No |
 | Xcode DerivedData | Yes | Yes | Yes |
 | npm / pip / Cargo | Yes | Partial | No |
 | Free & open source | Yes | No ($35/yr) | Yes |

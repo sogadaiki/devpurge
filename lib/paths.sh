@@ -14,6 +14,9 @@ DEVPURGE_PATHS+=(
   "A05|${HOME}/Library/Caches/ms-playwright|ai|Playwright browsers"
   "A06|${HOME}/.cache/puppeteer|ai|Puppeteer browsers"
   "A07|${HOME}/.bun/install/cache|ai|Bun package cache"
+  "A08|${HOME}/.codeium|ai|Codeium AI cache"
+  "A09|${HOME}/.claude/cache|ai|Claude Code CLI cache"
+  "A10|${HOME}/Library/Application Support/Kiro|ai|Kiro IDE cache"
 )
 
 # ── Tier 2: Standard Dev (comprehensive coverage) ────────────────────────────
@@ -40,6 +43,11 @@ DEVPURGE_PATHS+=(
   "D20|${HOME}/Library/Application Support/Google/Chrome/Default/IndexedDB|dev|Chrome IndexedDB"
   "D21|${HOME}/.npm/_npx|dev|npm npx cache"
   "D22|${HOME}/Library/Logs|dev|System & app logs"
+  "D23|${HOME}/.dotslash_cache|dev|dotslash binary cache"
+  "D24|${HOME}/Library/Caches/pypoetry|dev|Poetry cache"
+  "D25|${HOME}/.cache/node-gyp|dev|node-gyp cache"
+  "D26|${HOME}/.next-swc|dev|next-swc cache"
+  "D27|${HOME}/.cargo/registry/src|dev|Cargo registry source"
 )
 
 # ── Tier 3: Caution (--all to enable) ────────────────────────────────────────
@@ -51,6 +59,9 @@ DEVPURGE_PATHS+=(
   "C05|${HOME}/Library/Application Support/Steam/appcache|caution|Steam app cache"
   "C06|${HOME}/Library/Application Support/Adobe/Fonts|caution|Adobe font sync"
   "C07|${HOME}/Library/Application Support/Adobe/CoreSync|caution|Adobe CoreSync"
+  "C08|${HOME}/Library/Caches/us.zoom.xos|caution|Zoom cache"
+  "C09|${HOME}/Library/Application Support/Chatwork|caution|Chatwork cache"
+  "C10|${HOME}/Library/Application Support/Telegram Desktop|caution|Telegram cache"
 )
 
 # ── Whitelist: only these path prefixes are allowed for deletion ──────────────
@@ -66,6 +77,10 @@ DEVPURGE_WHITELIST=(
   "${HOME}/.cargo/"
   "${HOME}/.gradle/"
   "${HOME}/.m2/"
+  "${HOME}/.codeium/"
+  "${HOME}/.claude/cache/"
+  "${HOME}/.dotslash_cache/"
+  "${HOME}/.next-swc/"
 )
 
 # Verify a path is on the whitelist
@@ -77,9 +92,10 @@ devpurge_path_allowed() {
       "$prefix"*) return 0 ;;
     esac
   done
-  # Allow node_modules under $HOME
+  # Allow node_modules and .next under $HOME
   case "$target" in
     "${HOME}/"*/node_modules) return 0 ;;
+    "${HOME}/"*/.next) return 0 ;;
   esac
   return 1
 }

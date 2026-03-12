@@ -50,6 +50,51 @@ _scan_node_modules() {
   done
 }
 
+# Scan .next build caches in common project directories under $HOME
+_scan_next_cache() {
+  local search_dirs=(Desktop Documents Projects Developer src repos code dev workspace work)
+  local next_count=0
+
+  for dir_name in "${search_dirs[@]}"; do
+    local search_path="${HOME}/${dir_name}"
+    [[ -d "$search_path" ]] || continue
+
+    while IFS= read -r next_path; do
+      [[ -z "$next_path" ]] && continue
+
+      # Skip excluded paths
+      if devpurge_is_excluded "$next_path"; then
+        continue
+      fi
+
+      local size_human
+      size_human=$(du -sh "$next_path" 2>/dev/null | cut -f1 | xargs)
+      [[ -z "$size_human" || "$size_human" == "0B" || "$size_human" == "0" ]] && continue
+
+      local size_bytes
+      size_bytes=$(size_to_bytes "$size_human")
+
+      # Skip if less than 1MB
+      if [[ "${size_bytes%.*}" -lt 1048576 ]] 2>/dev/null; then
+        continue
+      fi
+
+      next_count=$((next_count + 1))
+      local next_id
+      next_id=$(printf "X%02d" "$next_count")
+
+      # Extract repo name from parent directory
+      local repo_name
+      repo_name=$(basename "$(dirname "$next_path")")
+
+      SCAN_RESULTS+=("${next_id}|${next_path}|project|.next cache (${repo_name})|${size_human}|${size_bytes}")
+      SCAN_TOTAL_BYTES=$((SCAN_TOTAL_BYTES + ${size_bytes%.*}))
+
+      printf "\r  Scanning .next caches: %-6s  %s" "$size_human" ".next cache (${repo_name})"
+    done < <(find "$search_path" -maxdepth 4 -name .next -type d -prune 2>/dev/null)
+  done
+}
+
 # Scan all paths and populate SCAN_RESULTS
 # Args: $1 = "all" to include caution tier, "ai" for AI-only, "" for ai+dev
 devpurge_scan() {
@@ -115,6 +160,8 @@ devpurge_scan() {
   # Scan node_modules in project directories (skip for ai-only mode and tests)
   if [[ "$mode" != "ai" && "${DEVPURGE_SKIP_NODE_MODULES:-}" != "1" ]]; then
     _scan_node_modules
+    printf "\r%-80s\r" " "
+    _scan_next_cache
     printf "\r%-80s\r" " "
   fi
 
