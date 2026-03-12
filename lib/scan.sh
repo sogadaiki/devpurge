@@ -17,6 +17,11 @@ _scan_node_modules() {
     while IFS= read -r nm_path; do
       [[ -z "$nm_path" ]] && continue
 
+      # Skip excluded paths
+      if devpurge_is_excluded "$nm_path"; then
+        continue
+      fi
+
       local size_human
       size_human=$(du -sh "$nm_path" 2>/dev/null | cut -f1 | xargs)
       [[ -z "$size_human" || "$size_human" == "0B" || "$size_human" == "0" ]] && continue
@@ -69,6 +74,11 @@ devpurge_scan() {
       continue
     fi
     if [[ "$mode" == "default" && "$tier" == "caution" ]]; then
+      continue
+    fi
+
+    # Skip excluded paths
+    if devpurge_is_excluded "$path"; then
       continue
     fi
 

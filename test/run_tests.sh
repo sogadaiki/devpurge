@@ -59,6 +59,7 @@ assert_exit_code() {
 export DEVPURGE_NO_COLOR=1
 export DEVPURGE_SKIP_NODE_MODULES=1
 source "${PROJECT_DIR}/lib/utils.sh"
+source "${PROJECT_DIR}/lib/config.sh"
 source "${PROJECT_DIR}/lib/paths.sh"
 source "${PROJECT_DIR}/lib/scan.sh"
 source "${PROJECT_DIR}/lib/report.sh"
@@ -188,6 +189,66 @@ DEVPURGE_PATHS=("${DEVPURGE_PATHS_BACKUP[@]}")
 DEVPURGE_WHITELIST=("${DEVPURGE_WHITELIST_BACKUP[@]}")
 
 # ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_exclude ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Test devpurge_is_excluded
+DEVPURGE_EXCLUDES=("${HOME}/test/node_modules" "${HOME}/other/cache")
+
+assert_exit_code "is_excluded matches exact path" 0 devpurge_is_excluded "${HOME}/test/node_modules"
+assert_exit_code "is_excluded matches second entry" 0 devpurge_is_excluded "${HOME}/other/cache"
+assert_exit_code "is_excluded rejects non-excluded" 1 devpurge_is_excluded "${HOME}/different/path"
+
+# Test exclude filters scan results
+TMPDIR_EXCL="${HOME}/.devpurge-test-excl-$$"
+mkdir -p "${TMPDIR_EXCL}/keep" "${TMPDIR_EXCL}/skip"
+dd if=/dev/zero of="${TMPDIR_EXCL}/keep/file1" bs=1024 count=100 2>/dev/null
+dd if=/dev/zero of="${TMPDIR_EXCL}/skip/file1" bs=1024 count=100 2>/dev/null
+
+DEVPURGE_PATHS_BACKUP2=("${DEVPURGE_PATHS[@]}")
+DEVPURGE_WHITELIST_BACKUP2=("${DEVPURGE_WHITELIST[@]}")
+DEVPURGE_PATHS=(
+  "T01|${TMPDIR_EXCL}/keep|ai|Test keep"
+  "T02|${TMPDIR_EXCL}/skip|dev|Test skip"
+)
+DEVPURGE_WHITELIST=("${TMPDIR_EXCL}/")
+DEVPURGE_EXCLUDES=("${TMPDIR_EXCL}/skip")
+
+devpurge_scan "all" 2>/dev/null
+
+TOTAL=$((TOTAL + 1))
+if [[ ${#SCAN_RESULTS[@]} -eq 1 ]]; then
+  printf "  PASS: exclude filtered out 1 path from scan\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: scan found %d results (expected 1 after exclude)\n" "${#SCAN_RESULTS[@]}"
+  FAIL=$((FAIL + 1))
+fi
+
+# Test rc file loading
+RC_TEST_FILE="${TMPDIR_EXCL}/testrc"
+printf "# comment line\nexclude=~/test/path1\nexclude=/absolute/path2\n\nexclude=~/trail/\n" > "$RC_TEST_FILE"
+
+DEVPURGE_EXCLUDES=()
+# Override HOME temporarily for rc test
+_orig_home="$HOME"
+HOME="$TMPDIR_EXCL"
+ln -sf "$RC_TEST_FILE" "${TMPDIR_EXCL}/.devpurgerc"
+devpurge_load_rc
+HOME="$_orig_home"
+
+assert_eq "rc loads 3 entries" "3" "${#DEVPURGE_EXCLUDES[@]}"
+assert_eq "rc expands tilde" "${TMPDIR_EXCL}/test/path1" "${DEVPURGE_EXCLUDES[0]}"
+assert_eq "rc keeps absolute" "/absolute/path2" "${DEVPURGE_EXCLUDES[1]}"
+assert_eq "rc strips trailing slash" "${TMPDIR_EXCL}/trail" "${DEVPURGE_EXCLUDES[2]}"
+
+# Cleanup
+rm -rf "$TMPDIR_EXCL"
+DEVPURGE_EXCLUDES=()
+DEVPURGE_PATHS=("${DEVPURGE_PATHS_BACKUP2[@]}")
+DEVPURGE_WHITELIST=("${DEVPURGE_WHITELIST_BACKUP2[@]}")
+
+# ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== test_cli ===\n\n"
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -199,6 +260,13 @@ assert_contains "version output" "devpurge 0.2.0" "$version_output"
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)
 assert_contains "help shows USAGE" "USAGE" "$help_output"
 assert_contains "help shows OPTIONS" "OPTIONS" "$help_output"
+
+# --exclude without arg
+assert_exit_code "exclude without arg exits 1" 1 "${PROJECT_DIR}/bin/devpurge" --exclude
+
+# --help shows exclude
+help_exclude_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)
+assert_contains "help shows --exclude" "exclude" "$help_exclude_output"
 
 # Unknown option
 assert_exit_code "unknown option exits 1" 1 "${PROJECT_DIR}/bin/devpurge" --bogus

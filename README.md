@@ -81,6 +81,12 @@ devpurge --ai-only
 
 # Include everything (Notion, Discord, Slack, etc.)
 devpurge -a
+
+# Exclude specific paths
+devpurge --exclude ~/Projects/my-app/node_modules
+
+# Multiple excludes
+devpurge --exclude ~/Projects/app1/node_modules --exclude ~/Projects/app2/node_modules
 ```
 
 ### Options
@@ -91,6 +97,7 @@ devpurge -a
 | `-a, --all` | Include caution-level caches |
 | `-y, --yes` | Skip confirmation prompt |
 | `-s, --share` | Generate shareable summary after cleanup |
+| `--exclude PATH` | Exclude path from scanning (repeatable) |
 | `--ai-only` | AI-era caches only |
 | `--no-color` | Disable colored output |
 | `-v, --version` | Show version |
@@ -139,6 +146,18 @@ Notion, Discord, Slack, Adobe Fonts, Adobe CoreSync, Filmora, Steam.
 | Free & open source | Yes | No ($35/yr) | Yes |
 | No GUI needed | Yes | No | No |
 | Zero dependencies | Yes | No | No |
+
+## Config File
+
+Create `~/.devpurgerc` to permanently exclude paths:
+
+```
+# Keep active project dependencies
+exclude=~/Desktop/development/my-app/node_modules
+exclude=~/Desktop/development/dashboard/node_modules
+```
+
+CLI `--exclude` flags are merged with config file entries.
 
 ## Safety
 

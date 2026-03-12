@@ -19,6 +19,8 @@ DEVPURGE_DIR="$(cd "$(dirname "$DEVPURGE_SCRIPT")/.." && pwd)"
 # ── Load libraries ───────────────────────────────────────────────────────────
 # shellcheck source=../lib/utils.sh
 source "${DEVPURGE_DIR}/lib/utils.sh"
+# shellcheck source=../lib/config.sh
+source "${DEVPURGE_DIR}/lib/config.sh"
 # shellcheck source=../lib/paths.sh
 source "${DEVPURGE_DIR}/lib/paths.sh"
 # shellcheck source=../lib/scan.sh
@@ -50,6 +52,7 @@ OPTIONS
   -a, --all         Include caution-level caches (Notion, Discord, Slack, etc.)
   -y, --yes         Skip confirmation prompt
   -s, --share       Generate share text after cleanup
+      --exclude P   Exclude path from scanning (repeatable)
       --ai-only     Scan AI-era caches only (Claude, Cursor, uv, etc.)
       --no-color    Disable colored output
   -v, --version     Show version
@@ -61,6 +64,7 @@ EXAMPLES
   devpurge -y -s            # Auto-confirm + share results
   devpurge --ai-only -n     # Check AI tool caches only
   devpurge -a               # Include Notion/Discord/Slack caches
+  devpurge --exclude ~/Projects/app/node_modules  # Skip specific path
 
 CACHE TIERS
   AI-Era   Claude Desktop, Cursor, uv, Playwright, Puppeteer, Bun
@@ -79,6 +83,17 @@ while [[ $# -gt 0 ]]; do
     -a|--all)       OPT_ALL=1; shift ;;
     -y|--yes)       OPT_YES=1; shift ;;
     -s|--share)     OPT_SHARE=1; shift ;;
+    --exclude)
+      if [[ -z "${2:-}" ]]; then
+        dp_error "--exclude requires a path argument"
+        exit 1
+      fi
+      _exc_path="${2/#\~/$HOME}"
+      _exc_path="${_exc_path%/}"
+      DEVPURGE_EXCLUDES+=("$_exc_path")
+      unset _exc_path
+      shift 2
+      ;;
     --ai-only)      OPT_AI_ONLY=1; shift ;;
     --no-color)     export DEVPURGE_NO_COLOR=1; shift ;;
     -v|--version)   echo "devpurge ${DEVPURGE_VERSION}"; exit 0 ;;
@@ -95,6 +110,9 @@ done
 if [[ "${DEVPURGE_NO_COLOR:-}" == "1" ]]; then
   source "${DEVPURGE_DIR}/lib/utils.sh"
 fi
+
+# ── Load config file ─────────────────────────────────────────────────────────
+devpurge_load_rc
 
 # ── macOS check ──────────────────────────────────────────────────────────────
 if [[ "$(uname)" != "Darwin" ]]; then
