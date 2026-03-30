@@ -43,17 +43,24 @@ devpurge_cleanup() {
       continue
     fi
 
-    # Safety: verify path is absolute and under $HOME
-    case "$path" in
-      "$HOME"/*)
-        ;;
-      *)
-        dp_error "  BLOCKED: $path is not under \$HOME"
-        CLEANUP_LOG+=("${id}|BLOCKED|0|${desc}|Not under HOME")
-        CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
-        continue
-        ;;
-    esac
+    # Safety: verify path is absolute and under $HOME (system tier exempt)
+    if [[ "$tier" != "system" ]]; then
+      case "$path" in
+        "$HOME"/*)
+          ;;
+        *)
+          dp_error "  BLOCKED: $path is not under \$HOME"
+          CLEANUP_LOG+=("${id}|BLOCKED|0|${desc}|Not under HOME")
+          CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+          continue
+          ;;
+      esac
+    fi
+
+    # Special handling for sleepimage: disable hibernation first
+    if [[ "$id" == "S01" ]]; then
+      pmset -a hibernatemode 0 2>/dev/null
+    fi
 
     # Delete
     printf "  Deleting %-6s %s..." "$size_human" "$desc"

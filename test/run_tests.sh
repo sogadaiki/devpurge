@@ -58,6 +58,7 @@ assert_exit_code() {
 # ── Source libraries ──────────────────────────────────────────────────────────
 export DEVPURGE_NO_COLOR=1
 export DEVPURGE_SKIP_NODE_MODULES=1
+export DEVPURGE_SKIP_MISC_CACHES=1
 source "${PROJECT_DIR}/lib/utils.sh"
 source "${PROJECT_DIR}/lib/config.sh"
 source "${PROJECT_DIR}/lib/paths.sh"
@@ -89,6 +90,7 @@ assert_eq "tier_label_plain ai" "AI-Era" "$(tier_label_plain ai)"
 assert_eq "tier_label_plain dev" "DevTool" "$(tier_label_plain dev)"
 assert_eq "tier_label_plain caution" "Caution" "$(tier_label_plain caution)"
 assert_eq "tier_label_plain project" "Project" "$(tier_label_plain project)"
+assert_eq "tier_label_plain system" "System" "$(tier_label_plain system)"
 
 # ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== test_paths ===\n\n"
@@ -117,6 +119,18 @@ assert_exit_code "whitelist allows nested node_modules" 0 devpurge_path_allowed 
 assert_exit_code "whitelist blocks Desktop" 1 devpurge_path_allowed "${HOME}/Desktop/test"
 assert_exit_code "whitelist blocks Documents" 1 devpurge_path_allowed "${HOME}/Documents/test"
 assert_exit_code "whitelist blocks root" 1 devpurge_path_allowed "/tmp/test"
+
+# System whitelist blocked when not root
+DEVPURGE_IS_ROOT=0
+assert_exit_code "system paths blocked when not root" 1 devpurge_path_allowed "/private/var/vm/sleepimage"
+assert_exit_code "system /Library blocked when not root" 1 devpurge_path_allowed "/Library/Updates"
+
+# System whitelist allowed when root
+DEVPURGE_IS_ROOT=1
+assert_exit_code "system paths allowed when root" 0 devpurge_path_allowed "/private/var/vm/sleepimage"
+assert_exit_code "system /Library allowed when root" 0 devpurge_path_allowed "/Library/Updates"
+assert_exit_code "system diagnostics allowed when root" 0 devpurge_path_allowed "/private/var/db/diagnostics"
+DEVPURGE_IS_ROOT=0
 
 # ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== test_scan ===\n\n"
@@ -254,7 +268,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.2.0" "$version_output"
+assert_contains "version output" "devpurge 0.3.0" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)

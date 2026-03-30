@@ -64,6 +64,24 @@ DEVPURGE_PATHS+=(
   "C10|${HOME}/Library/Application Support/Telegram Desktop|caution|Telegram cache"
 )
 
+# ── Tier 4: System (sudo devpurge only) ─────────────────────────────────────
+DEVPURGE_SYSTEM_PATHS=(
+  "S01|/private/var/vm/sleepimage|system|Sleep image (RAM snapshot)"
+  "S02|/private/var/root/.Trash|system|Root user Trash"
+  "S03|/private/var/db/diagnostics|system|System diagnostics logs"
+  "S04|/private/var/db/uuidtext|system|Diagnostics UUID text"
+  "S05|/Library/Updates|system|Software update cache"
+  "S06|/Library/Application Support/Adobe/Premiere Pro|system|Adobe Premiere Pro cache"
+  "S07|/Library/Application Support/Adobe/Adobe Media Encoder|system|Adobe Media Encoder cache"
+  "S08|/Library/Application Support/Adobe/Installers|system|Adobe old installers"
+  "S09|/Library/Application Support/Adobe/CEP|system|Adobe CEP extensions cache"
+  "S10|/Library/Application Support/GarageBand|system|GarageBand support data"
+  "S11|/Library/Application Support/iPhoto|system|iPhoto legacy data"
+  "S12|/Library/Application Support/iDVD|system|iDVD legacy data"
+  "S13|/Library/Application Support/iWork '09|system|iWork '09 legacy data"
+  "S14|/Library/Application Support/iLifeSlideshow|system|iLife slideshow legacy data"
+)
+
 # ── Whitelist: only these path prefixes are allowed for deletion ──────────────
 DEVPURGE_WHITELIST=(
   "${HOME}/Library/Application Support/"
@@ -80,13 +98,30 @@ DEVPURGE_WHITELIST=(
   "${HOME}/.codeium/"
 )
 
+# System-level paths allowed only when running as root
+DEVPURGE_SYSTEM_WHITELIST=(
+  "/private/var/vm/"
+  "/private/var/root/"
+  "/private/var/db/diagnostics"
+  "/private/var/db/uuidtext"
+  "/Library/Updates"
+  "/Library/Application Support/Adobe/"
+  "/Library/Application Support/GarageBand"
+  "/Library/Application Support/iPhoto"
+  "/Library/Application Support/iDVD"
+  "/Library/Application Support/iWork "
+  "/Library/Application Support/iLifeSlideshow"
+)
+
 # Verify a path is on the whitelist
 # Returns 0 if allowed, 1 if not
 devpurge_path_allowed() {
   local target="$1"
   for prefix in "${DEVPURGE_WHITELIST[@]}"; do
+    # Match both "prefix*" and exact "prefix" (without trailing slash)
+    local prefix_stripped="${prefix%/}"
     case "$target" in
-      "$prefix"*) return 0 ;;
+      "$prefix"*|"$prefix_stripped") return 0 ;;
     esac
   done
   # Allow node_modules and .next under $HOME
@@ -94,5 +129,14 @@ devpurge_path_allowed() {
     "${HOME}/"*/node_modules) return 0 ;;
     "${HOME}/"*/.next) return 0 ;;
   esac
+  # System paths allowed when running as root
+  if [[ "${DEVPURGE_IS_ROOT:-0}" == "1" ]]; then
+    for prefix in "${DEVPURGE_SYSTEM_WHITELIST[@]}"; do
+      local sys_prefix_stripped="${prefix%/}"
+      case "$target" in
+        "$prefix"*|"$sys_prefix_stripped") return 0 ;;
+      esac
+    done
+  fi
   return 1
 }

@@ -20,7 +20,7 @@ else
   CLR_DIM="\033[2m"
 fi
 
-DEVPURGE_VERSION="0.2.0"
+DEVPURGE_VERSION="0.3.0"
 
 # ── Print helpers ─────────────────────────────────────────────────────────────
 dp_info() {
@@ -115,6 +115,7 @@ tier_label() {
     dev)     printf "${CLR_GREEN}DevTool${CLR_RESET}" ;;
     caution) printf "${CLR_YELLOW}Caution${CLR_RESET}" ;;
     project) printf "${CLR_BOLD}Project${CLR_RESET}" ;;
+    system)  printf "${CLR_RED}System${CLR_RESET}" ;;
     *)       printf "%s" "$1" ;;
   esac
 }
@@ -125,6 +126,7 @@ tier_label_plain() {
     dev)     printf "DevTool" ;;
     caution) printf "Caution" ;;
     project) printf "Project" ;;
+    system)  printf "System" ;;
     *)       printf "%s" "$1" ;;
   esac
 }

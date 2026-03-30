@@ -16,6 +16,18 @@ while [[ -L "$DEVPURGE_SCRIPT" ]]; do
 done
 DEVPURGE_DIR="$(cd "$(dirname "$DEVPURGE_SCRIPT")/.." && pwd)"
 
+# ── Root detection (MUST run before loading libraries that use $HOME) ────────
+DEVPURGE_IS_ROOT=0
+if [[ "$(id -u)" -eq 0 ]]; then
+  DEVPURGE_IS_ROOT=1
+  # When running as root, $HOME may be /var/root. Use the real user's home.
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    HOME=$(eval echo "~${SUDO_USER}")
+    export HOME
+  fi
+fi
+export DEVPURGE_IS_ROOT
+
 # ── Load libraries ───────────────────────────────────────────────────────────
 # shellcheck source=../lib/utils.sh
 source "${DEVPURGE_DIR}/lib/utils.sh"
@@ -65,12 +77,14 @@ EXAMPLES
   devpurge --ai-only -n     # Check AI tool caches only
   devpurge -a               # Include Notion/Discord/Slack caches
   devpurge --exclude ~/Projects/app/node_modules  # Skip specific path
+  sudo devpurge -n          # Scan system-level caches (sleepimage, etc.)
 
 CACHE TIERS
   AI-Era   Claude Desktop, Cursor, uv, Playwright, Puppeteer, Bun
   DevTool  npm, Homebrew, Chrome, VS Code, pip, Cargo, Gradle, Xcode
   Project  node_modules in development projects (npm install で復元)
   Caution  Notion, Discord, Slack, Adobe, Steam (--all to include)
+  System   sleepimage, diagnostics, OS updates (sudo only)
 
 MORE INFO
   https://github.com/sogadaiki/devpurge
@@ -124,6 +138,9 @@ fi
 printf "\n"
 dp_bold "  devpurge v${DEVPURGE_VERSION}"
 dp_dim "  Purge hidden dev caches on macOS"
+if [[ "$DEVPURGE_IS_ROOT" -eq 1 ]]; then
+  dp_warn "  Running as root — system-level caches enabled"
+fi
 printf "\n"
 
 # ── Phase 1: Scan ────────────────────────────────────────────────────────────
