@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # devpurge - Utility functions
 
+# ── PATH normalization ────────────────────────────────────────────────────────
+# Ensure core utilities (tr, du, find, sed, xargs) resolve to system binaries
+# even if the user's $PATH has shadowing scripts earlier (e.g. ~/transcribe/tr
+# overriding /usr/bin/tr). Sourced by all entry points (bin/devpurge, tests).
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+
 # ── Color constants ───────────────────────────────────────────────────────────
 if [[ "${DEVPURGE_NO_COLOR:-}" == "1" ]] || [[ ! -t 1 ]]; then
   CLR_RESET=""
