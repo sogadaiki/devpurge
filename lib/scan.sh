@@ -14,9 +14,10 @@ DEVPURGE_WT_ROOTS=()
 
 # Measure a path in KB (accurate, no human-format rounding).
 # du exits non-zero on partially unreadable trees but still prints a total;
-# never propagate that failure (callers run under set -e).
+# never propagate that failure (callers run under set -e). head -1 guards
+# against newline-containing paths splitting du's output into extra lines.
 _dp_size_kb() {
-  du -sk "$1" 2>/dev/null | cut -f1 || true
+  du -sk "$1" 2>/dev/null | head -1 | cut -f1 || true
 }
 
 # Append a scan result and update totals.

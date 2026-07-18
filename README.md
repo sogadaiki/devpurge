@@ -196,6 +196,22 @@ sleepimage (with automatic `hibernatemode 0`), system diagnostics logs, software
 
 **What devpurge deliberately does NOT do**: mail attachments, language files, duplicate finders, "smart" scans of your documents. Dev caches only. Personal data is never touched — the Review tier exists precisely so the tool can inform without acting.
 
+## AI-Native Usage
+
+devpurge is designed to be **driven by an AI agent**, not just a human at a terminal. The division of labor:
+
+- **devpurge (deterministic layer)** decides what is *provably* safe: whitelisted caches, git-verified merged worktrees, `git branch -d`-safe branches. It also *refuses* what no tool should decide: protected patterns, review-tier data.
+- **Your AI agent (judgment layer)** reads `devpurge --json`, investigates the `review`-tier gray zone with real evidence — `git ls-remote` (is the branch backed up on origin?), `git ls-files --others -i --exclude-standard` (are the gitignored leftovers regenerable or one-of-a-kind?), your dev logs / notes / session history (was this work superseded?), Spotlight's `kMDItemLastUsedDate` (did a human ever open it again?) — and disposes via `devpurge quarantine <path> "<reason>"`.
+- **Quarantine (safety layer)** makes AI misjudgment cheap: everything is restorable for 30 days, and protected patterns are refused even here.
+
+```bash
+devpurge --json | your-agent   # candidates in, judgments out
+devpurge quarantine ~/old-thing "superseded by v2 per dev log 2026-07-01"
+devpurge quarantine --restore Q003   # the undo that makes bold AI judgment safe
+```
+
+The contract in one line: **the AI may be bold because the tool makes boldness reversible.**
+
 ## Config File
 
 Create `~/.devpurgerc`:

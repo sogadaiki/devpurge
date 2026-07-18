@@ -27,7 +27,10 @@ DEVPURGE_PROTECT_PATTERNS=(
 )
 
 devpurge_is_protected() {
-  local target="$1"
+  # NFC-normalize: an NFD-named "証拠" folder (Finder-created) must match the
+  # NFC patterns in this file
+  local target
+  target=$(_dp_nfc "$1")
   local pat
   for pat in "${DEVPURGE_PROTECT_PATTERNS[@]+"${DEVPURGE_PROTECT_PATTERNS[@]}"}"; do
     [[ -z "$pat" ]] && continue
@@ -49,6 +52,14 @@ devpurge_quarantine_add() {
     dp_error "quarantine: path not found: $target"
     return 1
   fi
+  # TSV manifest cannot represent control characters; a tab/newline in the
+  # path would corrupt the record and make the item silently unrestorable
+  case "$target" in
+    *$'\t'*|*$'\n'*|*$'\r'*)
+      dp_error "quarantine: REFUSED - path contains tab/newline (rename it first)"
+      return 1
+      ;;
+  esac
   case "$target" in
     "$HOME"/*) ;;
     *) dp_error "quarantine: only paths under \$HOME are supported"; return 1 ;;
@@ -74,13 +85,16 @@ devpurge_quarantine_add() {
   size_kb=$(_dp_size_kb "$target")
   [[ -z "$size_kb" ]] && size_kb=0
 
-  # Next ID
-  local count=0
+  # Next ID: max existing + 1 (line counting collides after manual edits)
+  local max_id=0
   if [[ -f "$manifest" ]]; then
-    count=$(grep -c . "$manifest" 2>/dev/null || true)
+    max_id=$(cut -f1 "$manifest" 2>/dev/null | sed 's/^Q0*//' | sort -rn | head -1 || true)
+    case "$max_id" in
+      ''|*[!0-9]*) max_id=0 ;;
+    esac
   fi
   local qid
-  qid=$(printf "Q%03d" $((count + 1)))
+  qid=$(printf "Q%03d" $((max_id + 1)))
 
   local stored="${DEVPURGE_QUARANTINE_DIR}/${qid}-$(basename "$target")"
   if ! mv "$target" "$stored" 2>/dev/null; then
@@ -89,8 +103,10 @@ devpurge_quarantine_add() {
     return 1
   fi
 
-  # Reason must not break TSV
+  # Reason must not break TSV (tabs AND newlines)
   reason="${reason//$'\t'/ }"
+  reason="${reason//$'\n'/ }"
+  reason="${reason//$'\r'/ }"
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$qid" "$(date +%s)" "$target" "$size_kb" "$stored" "$reason" >> "$manifest"
 
@@ -118,7 +134,10 @@ devpurge_quarantine_list() {
   local qid epoch orig size_kb stored reason
   while IFS=$'\t' read -r qid epoch orig size_kb stored reason; do
     [[ -z "$qid" ]] && continue
-    [[ -e "$stored" ]] || continue
+    if [[ ! -e "$stored" ]]; then
+      dp_warn "  ${qid}: stored copy missing (moved manually?): ${stored}"
+      continue
+    fi
     local age_days=$(( (now - epoch) / 86400 ))
     local state="held"
     if [[ "$age_days" -ge "$DEVPURGE_QUARANTINE_DAYS" ]]; then
@@ -132,6 +151,16 @@ devpurge_quarantine_list() {
   return 0
 }
 
+# Drop a manifest row by ID (called after successful restore/expire)
+_dp_manifest_drop() {
+  local drop_id="$1"
+  local manifest
+  manifest=$(_dp_quarantine_manifest)
+  [[ -f "$manifest" ]] || return 0
+  local tmp="${manifest}.tmp.$$"
+  awk -F'\t' -v id="$drop_id" '$1 != id' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+}
+
 # Restore an entry by ID
 devpurge_quarantine_restore() {
   local want="$1"
@@ -139,11 +168,20 @@ devpurge_quarantine_restore() {
   manifest=$(_dp_quarantine_manifest)
   [[ -f "$manifest" ]] || { dp_error "Quarantine is empty."; return 1; }
 
+  # Refuse ambiguous IDs (should not happen, but fail safe)
+  local matches
+  matches=$(cut -f1 "$manifest" 2>/dev/null | grep -c "^${want}$" || true)
+  if [[ "${matches:-0}" -gt 1 ]]; then
+    dp_error "restore: ID ${want} appears ${matches} times in the manifest - refusing."
+    dp_error "  Inspect manually: $manifest"
+    return 1
+  fi
+
   local qid epoch orig size_kb stored reason
   while IFS=$'\t' read -r qid epoch orig size_kb stored reason; do
     [[ "$qid" == "$want" ]] || continue
     if [[ ! -e "$stored" ]]; then
-      dp_error "restore: stored copy is gone (already expired?): $stored"
+      dp_error "restore: stored copy not found (moved manually?): $stored"
       return 1
     fi
     if [[ -e "$orig" ]]; then
@@ -152,6 +190,7 @@ devpurge_quarantine_restore() {
     fi
     mkdir -p "$(dirname "$orig")" || return 1
     if mv "$stored" "$orig" 2>/dev/null; then
+      _dp_manifest_drop "$want"
       dp_success "Restored ${qid} -> ${orig}"
       return 0
     fi
@@ -174,6 +213,7 @@ devpurge_quarantine_expire() {
   local now
   now=$(date +%s)
   local expired_kb=0 expired_count=0
+  local dropped_ids=()
 
   local qid epoch orig size_kb stored reason
   while IFS=$'\t' read -r qid epoch orig size_kb stored reason; do
@@ -195,9 +235,16 @@ devpurge_quarantine_expire() {
     if rm -rf "$stored" 2>/dev/null; then
       expired_count=$((expired_count + 1))
       expired_kb=$((expired_kb + size_kb))
+      dropped_ids+=("$qid")
       dp_dim "  Expired from quarantine: ${qid} $(basename "$stored") (held ${age_days}d)"
     fi
   done < "$manifest"
+
+  # Remove expired rows so IDs never collide with future entries
+  local did
+  for did in "${dropped_ids[@]+"${dropped_ids[@]}"}"; do
+    [[ -n "$did" ]] && _dp_manifest_drop "$did"
+  done
 
   if [[ "$expired_count" -gt 0 ]]; then
     if [[ "$dry" == "dry" ]]; then

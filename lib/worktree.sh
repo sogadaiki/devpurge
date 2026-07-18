@@ -15,13 +15,20 @@
 # ~/.devpurgerc (worktree_age_days=N).
 DEVPURGE_WORKTREE_AGE_DAYS="${DEVPURGE_WORKTREE_AGE_DAYS:-7}"
 
-# Resolve the default branch of a repo (main/master, remote HEAD preferred)
+# Resolve the default branch of a repo (main/master, remote HEAD preferred).
+# origin/HEAD is a local cache that `git fetch` never updates - trust it only
+# if its target still exists as a remote-tracking ref; refresh with
+# `git remote set-head origin -a` when a repo migrates its default branch.
 _dp_default_branch() {
   local repo="$1" ref
   ref=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
   if [[ -n "$ref" ]]; then
-    printf '%s' "$ref"
-    return 0
+    local ref_branch="${ref#origin/}"
+    if git -C "$repo" show-ref --verify --quiet "refs/remotes/${ref}" \
+       && git -C "$repo" show-ref --verify --quiet "refs/heads/${ref_branch}"; then
+      printf '%s' "$ref"
+      return 0
+    fi
   fi
   if git -C "$repo" show-ref --verify --quiet refs/heads/main; then
     printf 'main'
@@ -130,10 +137,23 @@ _dp_classify_worktree() {
       else
         # Squash-merge detection: `git cherry` marks commits whose patch
         # already exists upstream with "-". All "-" = effectively merged.
+        # patch-id can collide (identical change made twice), so a
+        # squash-merged worktree is only deletable when its branch is ALSO
+        # backed up on origin - then removal can lose nothing either way.
         local cherry
         cherry=$(git -C "$repo" cherry "$default_branch" "$wt_head" 2>/dev/null || true)
         if [[ -n "$cherry" ]] && ! printf '%s\n' "$cherry" | grep -q '^+'; then
-          merge_kind="squash-merged"
+          local wt_branch remote_head
+          wt_branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)
+          remote_head=""
+          if [[ -n "$wt_branch" && "$wt_branch" != "HEAD" ]]; then
+            remote_head=$(git -C "$repo" rev-parse --verify --quiet "refs/remotes/origin/${wt_branch}" 2>/dev/null || true)
+          fi
+          if [[ -n "$remote_head" && "$remote_head" == "$wt_head" ]]; then
+            merge_kind="squash-merged"
+          else
+            state="squash-merged (branch not pushed - review)"
+          fi
         fi
       fi
 
@@ -148,7 +168,7 @@ _dp_classify_worktree() {
         else
           state="${merge_kind} but recently active"
         fi
-      else
+      elif [[ -z "$state" ]]; then
         state="unmerged branch"
       fi
     fi

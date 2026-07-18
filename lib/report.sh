@@ -29,9 +29,10 @@ devpurge_report_json() {
     first=0
     local deletable="true"
     [[ "$tier" == "review" ]] && deletable="false"
-    printf '    {"id": "%s", "tier": "%s", "deletable": %s, "bytes": %s, "size": "%s", "path": "%s", "description": "%s"}' \
+    printf '    {"id": "%s", "tier": "%s", "deletable": %s, "bytes": %s, "size": "%s", "path": "%s", "description": "%s", "meta": "%s"}' \
       "$(_dp_json_escape "$id")" "$(_dp_json_escape "$tier")" "$deletable" "${size_bytes%.*}" \
-      "$(_dp_json_escape "$size_human")" "$(_dp_json_escape "$path")" "$(_dp_json_escape "$desc")"
+      "$(_dp_json_escape "$size_human")" "$(_dp_json_escape "$path")" "$(_dp_json_escape "$desc")" \
+      "$(_dp_json_escape "$meta")"
   done
 
   printf '\n  ]\n}\n'

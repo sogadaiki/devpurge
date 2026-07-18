@@ -544,17 +544,43 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# restore drops the manifest row
+TOTAL=$((TOTAL + 1))
+if ! grep -q "^Q001	" "${DEVPURGE_QUARANTINE_DIR}/manifest.tsv" 2>/dev/null; then
+  printf "  PASS: restore removes manifest row\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: restored row still in manifest\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# control characters in path are refused
+mkdir -p "${Q_TMP}/evil"$'\t'"tab" 2>/dev/null
+assert_exit_code "quarantine refuses tab in path" 1 devpurge_quarantine_add "${Q_TMP}/evil"$'\t'"tab" "x"
+rm -rf "${Q_TMP}/evil"$'\t'"tab" 2>/dev/null
+
 # expire: re-add, backdate the manifest, expire
 devpurge_quarantine_add "${Q_TMP}/target" "expire test" >/dev/null 2>&1
+q_last_id=$(cut -f1 "${DEVPURGE_QUARANTINE_DIR}/manifest.tsv" | tail -1)
 old_epoch=$(( $(date +%s) - 40 * 86400 ))
-sed -i '' "s/^Q002	[0-9]*	/Q002	${old_epoch}	/" "${DEVPURGE_QUARANTINE_DIR}/manifest.tsv"
+sed -i '' "s/^${q_last_id}	[0-9]*	/${q_last_id}	${old_epoch}	/" "${DEVPURGE_QUARANTINE_DIR}/manifest.tsv"
 devpurge_quarantine_expire >/dev/null 2>&1
 TOTAL=$((TOTAL + 1))
-if [[ ! -e "${DEVPURGE_QUARANTINE_DIR}/Q002-target" ]]; then
+if [[ ! -e "${DEVPURGE_QUARANTINE_DIR}/${q_last_id}-target" ]]; then
   printf "  PASS: quarantine expire deletes old entries\n"
   PASS=$((PASS + 1))
 else
   printf "  FAIL: expired entry still present\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# expired row is dropped from the manifest (no future ID collision)
+TOTAL=$((TOTAL + 1))
+if ! grep -q "^${q_last_id}	" "${DEVPURGE_QUARANTINE_DIR}/manifest.tsv" 2>/dev/null; then
+  printf "  PASS: expire removes manifest row\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: expired row still in manifest\n"
   FAIL=$((FAIL + 1))
 fi
 
@@ -603,7 +629,9 @@ printf "\n=== test_squash_merge ===\n\n"
 
 SQ_TMP="${HOME}/.devpurge-test-sq-$$"
 mkdir -p "${SQ_TMP}/repo"
+git init --bare -q "${SQ_TMP}/origin.git"
 git -C "${SQ_TMP}/repo" init -q -b main
+git -C "${SQ_TMP}/repo" remote add origin "${SQ_TMP}/origin.git"
 git -C "${SQ_TMP}/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 git -C "${SQ_TMP}/repo" worktree add -q "${SQ_TMP}/wt-squash" -b feat-squash
 dd if=/dev/zero of="${SQ_TMP}/wt-squash/blob" bs=1024 count=2048 2>/dev/null
@@ -613,15 +641,25 @@ git -C "${SQ_TMP}/wt-squash" -c user.name=t -c user.email=t@t commit -q -m "add 
 git -C "${SQ_TMP}/repo" merge --squash feat-squash >/dev/null 2>&1
 git -C "${SQ_TMP}/repo" -c user.name=t -c user.email=t@t commit -q -m "squashed: add blob"
 
+# NOT pushed yet -> patch-id collision guard must demote to review
 SCAN_RESULTS=()
 WT_COUNT=0
 RV_COUNT=0
 DEVPURGE_WT_ROOTS=()
 DEVPURGE_WORKTREE_AGE_DAYS=0
 _dp_scan_repo_worktrees "${SQ_TMP}/repo" >/dev/null
+sq_unpushed=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "branch not pushed" || true)
+assert_eq "unpushed squash-merge is review-only" "1" "$sq_unpushed"
 
+# Pushed to origin -> deletable
+git -C "${SQ_TMP}/wt-squash" push -q origin feat-squash
+SCAN_RESULTS=()
+WT_COUNT=0
+RV_COUNT=0
+DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${SQ_TMP}/repo" >/dev/null
 sq_deletable=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "squash-merged, clean" || true)
-assert_eq "squash-merged worktree detected as deletable" "1" "$sq_deletable"
+assert_eq "pushed squash-merged worktree is deletable" "1" "$sq_deletable"
 
 git -C "${SQ_TMP}/repo" worktree remove --force "${SQ_TMP}/wt-squash" >/dev/null 2>&1 || true
 rm -rf "$SQ_TMP"
@@ -657,7 +695,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.5.0" "$version_output"
+assert_contains "version output" "devpurge 0.5.1" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)

@@ -6,17 +6,7 @@
 
 DEVPURGE_STALE_DAYS="${DEVPURGE_STALE_DAYS:-90}"
 
-# Normalize a string to NFC. Finder creates NFD names, git checkouts create
-# NFC - visually identical paths can differ byte-wise on macOS.
-_dp_nfc() {
-  local s="$1" out
-  out=$(printf '%s' "$s" | iconv -f UTF-8-MAC -t UTF-8 2>/dev/null || true)
-  if [[ -n "$out" ]]; then
-    printf '%s' "$out"
-  else
-    printf '%s' "$s"
-  fi
-}
+# _dp_nfc lives in lib/utils.sh (shared with protected-pattern matching)
 
 # True if both paths sit at the same relative location inside git checkouts
 # (i.e. the same repo file seen through multiple worktrees - not a stray copy)

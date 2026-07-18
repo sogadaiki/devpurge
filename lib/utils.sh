@@ -26,7 +26,7 @@ else
   CLR_DIM="\033[2m"
 fi
 
-DEVPURGE_VERSION="0.5.0"
+DEVPURGE_VERSION="0.5.1"
 
 # ── Print helpers ─────────────────────────────────────────────────────────────
 dp_info() {
@@ -51,6 +51,21 @@ dp_bold() {
 
 dp_dim() {
   printf "${CLR_DIM}%s${CLR_RESET}\n" "$*"
+}
+
+# ── Unicode normalization ─────────────────────────────────────────────────────
+# Normalize a string to NFC. Finder creates NFD names, git checkouts create
+# NFC - visually identical Japanese paths can differ byte-wise on macOS.
+# Used by duplicate detection AND protected-pattern matching (an NFD "証拠"
+# must not slip past an NFC pattern).
+_dp_nfc() {
+  local s="$1" out
+  out=$(printf '%s' "$s" | iconv -f UTF-8-MAC -t UTF-8 2>/dev/null || true)
+  if [[ -n "$out" ]]; then
+    printf '%s' "$out"
+  else
+    printf '%s' "$s"
+  fi
 }
 
 # ── Size conversion ───────────────────────────────────────────────────────────
