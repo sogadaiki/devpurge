@@ -59,9 +59,12 @@ assert_exit_code() {
 export DEVPURGE_NO_COLOR=1
 export DEVPURGE_SKIP_NODE_MODULES=1
 export DEVPURGE_SKIP_MISC_CACHES=1
+export DEVPURGE_SKIP_WORKTREES=1
+export DEVPURGE_SKIP_REVIEW=1
 source "${PROJECT_DIR}/lib/utils.sh"
 source "${PROJECT_DIR}/lib/config.sh"
 source "${PROJECT_DIR}/lib/paths.sh"
+source "${PROJECT_DIR}/lib/worktree.sh"
 source "${PROJECT_DIR}/lib/scan.sh"
 source "${PROJECT_DIR}/lib/report.sh"
 source "${PROJECT_DIR}/lib/cleanup.sh"
@@ -263,12 +266,234 @@ DEVPURGE_PATHS=("${DEVPURGE_PATHS_BACKUP2[@]}")
 DEVPURGE_WHITELIST=("${DEVPURGE_WHITELIST_BACKUP2[@]}")
 
 # ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_exclude_prefix ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+DEVPURGE_EXCLUDES=("${HOME}/test/node_modules")
+assert_exit_code "exclude matches child path" 0 devpurge_is_excluded "${HOME}/test/node_modules/react"
+assert_exit_code "exclude rejects sibling prefix" 1 devpurge_is_excluded "${HOME}/test/node_modules-other"
+DEVPURGE_EXCLUDES=()
+
+# ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_rm_guard ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+assert_exit_code "guard blocks empty path" 1 devpurge_rm_guard ""
+assert_exit_code "guard blocks root" 1 devpurge_rm_guard "/"
+assert_exit_code "guard blocks HOME itself" 1 devpurge_rm_guard "$HOME"
+assert_exit_code "guard blocks relative path" 1 devpurge_rm_guard "Library/Caches"
+assert_exit_code "guard blocks traversal" 1 devpurge_rm_guard "${HOME}/Library/../.ssh"
+assert_exit_code "guard allows normal path" 0 devpurge_rm_guard "${HOME}/Library/Caches/foo"
+
+GUARD_LINK="${HOME}/.devpurge-test-link-$$"
+ln -s /tmp "$GUARD_LINK"
+assert_exit_code "guard blocks symlink target" 1 devpurge_rm_guard "$GUARD_LINK"
+rm -f "$GUARD_LINK"
+
+# ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_review_protection ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+REVIEW_TMP="${HOME}/.devpurge-test-review-$$"
+mkdir -p "$REVIEW_TMP/userdata"
+dd if=/dev/zero of="${REVIEW_TMP}/userdata/file1" bs=1024 count=100 2>/dev/null
+
+DEVPURGE_WHITELIST_BACKUP3=("${DEVPURGE_WHITELIST[@]}")
+DEVPURGE_WHITELIST=("${REVIEW_TMP}/")
+SCAN_RESULTS=("V99|${REVIEW_TMP}/userdata|review|Test review data|100K|102400|")
+devpurge_cleanup "all" >/dev/null 2>&1
+
+TOTAL=$((TOTAL + 1))
+if [[ -d "${REVIEW_TMP}/userdata" ]]; then
+  printf "  PASS: review tier survives cleanup all\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: review tier was deleted\n"
+  FAIL=$((FAIL + 1))
+fi
+assert_eq "review cleanup deleted count" "0" "$CLEANUP_DELETED"
+
+rm -rf "$REVIEW_TMP"
+DEVPURGE_WHITELIST=("${DEVPURGE_WHITELIST_BACKUP3[@]}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_worktree ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+WT_TMP="${HOME}/.devpurge-test-wt-$$"
+mkdir -p "${WT_TMP}/repo"
+git -C "${WT_TMP}/repo" init -q -b main
+git -C "${WT_TMP}/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+dd if=/dev/zero of="${WT_TMP}/repo/blob" bs=1024 count=2048 2>/dev/null
+git -C "${WT_TMP}/repo" add blob
+git -C "${WT_TMP}/repo" -c user.name=t -c user.email=t@t commit -q -m blob
+
+git -C "${WT_TMP}/repo" worktree add -q "${WT_TMP}/wt-merged" -b feat-merged
+git -C "${WT_TMP}/repo" worktree add -q "${WT_TMP}/wt-dirty" -b feat-dirty
+echo "x" > "${WT_TMP}/wt-dirty/untracked.txt"
+
+# Merged+clean with age 0 -> deletable; dirty -> review
+SCAN_RESULTS=()
+SCAN_TOTAL_BYTES=0
+SCAN_REVIEW_BYTES=0
+WT_COUNT=0
+RV_COUNT=0
+DEVPURGE_WT_ROOTS=()
+DEVPURGE_WORKTREE_AGE_DAYS=0
+_dp_scan_repo_worktrees "${WT_TMP}/repo" >/dev/null
+
+wt_entries=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|worktree|" || true)
+rv_entries=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|review|" || true)
+assert_eq "merged+clean worktree is deletable" "1" "$wt_entries"
+assert_eq "dirty worktree is review-only" "1" "$rv_entries"
+
+# Cleanup removes the merged worktree via git, leaves the dirty one
+devpurge_cleanup "all" >/dev/null 2>&1
+
+TOTAL=$((TOTAL + 1))
+if [[ ! -d "${WT_TMP}/wt-merged" ]]; then
+  printf "  PASS: cleanup removed merged worktree via git\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: merged worktree still exists\n"
+  FAIL=$((FAIL + 1))
+fi
+
+TOTAL=$((TOTAL + 1))
+if [[ -d "${WT_TMP}/wt-dirty" ]]; then
+  printf "  PASS: dirty worktree untouched\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: dirty worktree was deleted\n"
+  FAIL=$((FAIL + 1))
+fi
+
+git -C "${WT_TMP}/repo" worktree remove --force "${WT_TMP}/wt-dirty" >/dev/null 2>&1 || true
+rm -rf "$WT_TMP"
+DEVPURGE_WORKTREE_AGE_DAYS=7
+
+# ── Unattended gating: -y must NOT remove worktrees without opt-in ──────────
+WT_TMP2="${HOME}/.devpurge-test-wt2-$$"
+mkdir -p "${WT_TMP2}/repo"
+git -C "${WT_TMP2}/repo" init -q -b main
+git -C "${WT_TMP2}/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+dd if=/dev/zero of="${WT_TMP2}/repo/blob" bs=1024 count=2048 2>/dev/null
+git -C "${WT_TMP2}/repo" add blob
+git -C "${WT_TMP2}/repo" -c user.name=t -c user.email=t@t commit -q -m blob
+git -C "${WT_TMP2}/repo" worktree add -q "${WT_TMP2}/wt-auto" -b feat-auto
+
+SCAN_RESULTS=("W01|${WT_TMP2}/wt-auto|worktree|worktree: wt-auto (merged, clean)|2M|2097152|remove:${WT_TMP2}/repo")
+OPT_YES=1
+DEVPURGE_WORKTREE_AUTO=0
+devpurge_cleanup "all" >/dev/null 2>&1
+
+TOTAL=$((TOTAL + 1))
+if [[ -d "${WT_TMP2}/wt-auto" ]]; then
+  printf "  PASS: unattended run skips worktree removal\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: unattended run removed worktree without opt-in\n"
+  FAIL=$((FAIL + 1))
+fi
+
+DEVPURGE_WORKTREE_AUTO=1
+devpurge_cleanup "all" >/dev/null 2>&1
+
+TOTAL=$((TOTAL + 1))
+if [[ ! -d "${WT_TMP2}/wt-auto" ]]; then
+  printf "  PASS: worktree_auto=1 enables unattended removal\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: worktree_auto=1 did not remove worktree\n"
+  FAIL=$((FAIL + 1))
+fi
+
+OPT_YES=0
+DEVPURGE_WORKTREE_AUTO=0
+rm -rf "$WT_TMP2"
+
+# ── .env guard: worktree containing .env files is review-only ───────────────
+WT_TMP3="${HOME}/.devpurge-test-wt3-$$"
+mkdir -p "${WT_TMP3}/repo"
+git -C "${WT_TMP3}/repo" init -q -b main
+git -C "${WT_TMP3}/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+dd if=/dev/zero of="${WT_TMP3}/repo/blob" bs=1024 count=2048 2>/dev/null
+printf "blob\n.env.local\n" > "${WT_TMP3}/repo/.gitignore"
+git -C "${WT_TMP3}/repo" add .gitignore
+git -C "${WT_TMP3}/repo" -c user.name=t -c user.email=t@t commit -q -m gitignore
+git -C "${WT_TMP3}/repo" worktree add -q "${WT_TMP3}/wt-env" -b feat-env
+dd if=/dev/zero of="${WT_TMP3}/wt-env/blob" bs=1024 count=2048 2>/dev/null
+echo "SECRET=x" > "${WT_TMP3}/wt-env/.env.local"
+
+SCAN_RESULTS=()
+WT_COUNT=0
+RV_COUNT=0
+DEVPURGE_WT_ROOTS=()
+DEVPURGE_WORKTREE_AGE_DAYS=0
+_dp_scan_repo_worktrees "${WT_TMP3}/repo" >/dev/null
+
+env_review=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "contains .env files" || true)
+assert_eq "worktree with .env is review-only" "1" "$env_review"
+
+git -C "${WT_TMP3}/repo" worktree remove --force "${WT_TMP3}/wt-env" >/dev/null 2>&1 || true
+rm -rf "$WT_TMP3"
+DEVPURGE_WORKTREE_AGE_DAYS=7
+
+# ── Symlinked parent must not escape the whitelist ──────────────────────────
+SYM_TMP="${HOME}/.devpurge-test-sym-$$"
+SYM_OUTSIDE="${TMPDIR:-/tmp}/devpurge-sym-target-$$"
+mkdir -p "$SYM_OUTSIDE/payload"
+ln -s "$SYM_OUTSIDE" "$SYM_TMP"
+
+DEVPURGE_WHITELIST_BACKUP4=("${DEVPURGE_WHITELIST[@]}")
+DEVPURGE_WHITELIST=("${SYM_TMP}/")
+SCAN_RESULTS=("Z01|${SYM_TMP}/payload|dev|Symlink escape test|1K|1024|")
+devpurge_cleanup "all" >/dev/null 2>&1
+
+TOTAL=$((TOTAL + 1))
+if [[ -d "$SYM_OUTSIDE/payload" ]]; then
+  printf "  PASS: symlinked parent blocked from deletion\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: deletion escaped through symlinked parent\n"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -f "$SYM_TMP"
+rm -rf "$SYM_OUTSIDE"
+DEVPURGE_WHITELIST=("${DEVPURGE_WHITELIST_BACKUP4[@]}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_json ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+SCAN_RESULTS=('T01|/tmp/x "y"|dev|Desc with "quote"|1K|1024|')
+SCAN_TOTAL_BYTES=1024
+SCAN_REVIEW_BYTES=0
+json_output=$(devpurge_report_json)
+assert_contains "json has version" "\"version\": \"${DEVPURGE_VERSION}\"" "$json_output"
+assert_contains "json escapes quotes" 'Desc with \\\"quote\\\"' "$json_output"
+TOTAL=$((TOTAL + 1))
+if command -v python3 >/dev/null 2>&1; then
+  if echo "$json_output" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
+    printf "  PASS: json parses cleanly\n"
+    PASS=$((PASS + 1))
+  else
+    printf "  FAIL: json does not parse\n"
+    FAIL=$((FAIL + 1))
+  fi
+else
+  printf "  PASS: json parse check skipped (no python3)\n"
+  PASS=$((PASS + 1))
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== test_cli ===\n\n"
 # ══════════════════════════════════════════════════════════════════════════════
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.3.0" "$version_output"
+assert_contains "version output" "devpurge 0.4.0" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)

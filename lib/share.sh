@@ -12,7 +12,8 @@ devpurge_share() {
   local shown=0
   local remaining=0
 
-  for entry in "${CLEANUP_LOG[@]}"; do
+  for entry in "${CLEANUP_LOG[@]+"${CLEANUP_LOG[@]}"}"; do
+    [[ -z "$entry" ]] && continue
     local id status size_bytes desc detail
     IFS='|' read -r id status size_bytes desc detail <<< "$entry"
 

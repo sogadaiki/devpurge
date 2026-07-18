@@ -35,10 +35,14 @@ source "${DEVPURGE_DIR}/lib/utils.sh"
 source "${DEVPURGE_DIR}/lib/config.sh"
 # shellcheck source=../lib/paths.sh
 source "${DEVPURGE_DIR}/lib/paths.sh"
+# shellcheck source=../lib/worktree.sh
+source "${DEVPURGE_DIR}/lib/worktree.sh"
 # shellcheck source=../lib/scan.sh
 source "${DEVPURGE_DIR}/lib/scan.sh"
 # shellcheck source=../lib/report.sh
 source "${DEVPURGE_DIR}/lib/report.sh"
+# shellcheck source=../lib/discover.sh
+source "${DEVPURGE_DIR}/lib/discover.sh"
 # shellcheck source=../lib/cleanup.sh
 source "${DEVPURGE_DIR}/lib/cleanup.sh"
 # shellcheck source=../lib/share.sh
@@ -50,6 +54,9 @@ OPT_ALL=0
 OPT_YES=0
 OPT_SHARE=0
 OPT_AI_ONLY=0
+OPT_TRASH=0
+OPT_JSON=0
+OPT_DISCOVER=0
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 show_help() {
@@ -60,15 +67,19 @@ USAGE
   devpurge [OPTIONS]
 
 OPTIONS
-  -n, --dry-run     Scan only, don't delete anything
-  -a, --all         Include caution-level caches (Notion, Discord, Slack, etc.)
-  -y, --yes         Skip confirmation prompt
-  -s, --share       Generate share text after cleanup
-      --exclude P   Exclude path from scanning (repeatable)
-      --ai-only     Scan AI-era caches only (Claude, Cursor, uv, etc.)
-      --no-color    Disable colored output
-  -v, --version     Show version
-  -h, --help        Show this help
+  -n, --dry-run       Scan only, don't delete anything
+  -a, --all           Include caution-level caches (Notion, Discord, Slack, etc.)
+  -y, --yes           Skip confirmation prompt
+  -s, --share         Generate share text after cleanup
+      --exclude P     Exclude path and everything under it (repeatable)
+      --ai-only       Scan AI-era caches only (Claude, Cursor, uv, etc.)
+      --trash         Move to ~/.Trash instead of deleting (recoverable)
+      --json          Print scan results as JSON and exit (implies dry run)
+      --discover      Show largest items under \$HOME (read-only) and exit
+      --no-worktrees  Skip stale git worktree detection
+      --no-color      Disable colored output
+  -v, --version       Show version
+  -h, --help          Show this help
 
 EXAMPLES
   devpurge                  # Scan & clean dev caches (interactive)
@@ -80,11 +91,18 @@ EXAMPLES
   sudo devpurge -n          # Scan system-level caches (sleepimage, etc.)
 
 CACHE TIERS
-  AI-Era   Claude Desktop, Cursor, uv, Playwright, Puppeteer, Bun
-  DevTool  npm, Homebrew, Chrome, VS Code, pip, Cargo, Gradle, Xcode
-  Project  node_modules in development projects (npm install で復元)
-  Caution  Notion, Discord, Slack, Adobe, Steam (--all to include)
-  System   sleepimage, diagnostics, OS updates (sudo only)
+  AI-Era    Claude Code, Codex, Cursor, uv, Playwright, Puppeteer, Bun
+  DevTool   npm, Homebrew, Chrome, VS Code, pip, Cargo, Gradle, Xcode
+            + auto-detected app caches (Electron/Container/misc)
+  Project   node_modules / .next in development projects (再インストールで復元)
+  Worktree  merged & idle git worktrees (removed via git, never rm -rf)
+  Caution   Notion, Discord, Slack, Adobe, Steam, AI models (--all to include)
+  Review    large user data - reported only, NEVER deleted (Downloads, sessions)
+  System    sleepimage, diagnostics, OS updates (sudo only)
+
+CONFIG (~/.devpurgerc)
+  exclude=~/path            # skip path and everything under it
+  worktree_age_days=7       # idle days before merged worktrees are deletable
 
 MORE INFO
   https://github.com/sogadaiki/devpurge
@@ -109,6 +127,10 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --ai-only)      OPT_AI_ONLY=1; shift ;;
+    --trash)        OPT_TRASH=1; shift ;;
+    --json)         OPT_JSON=1; export DEVPURGE_NO_COLOR=1; shift ;;
+    --discover)     OPT_DISCOVER=1; shift ;;
+    --no-worktrees) export DEVPURGE_SKIP_WORKTREES=1; shift ;;
     --no-color)     export DEVPURGE_NO_COLOR=1; shift ;;
     -v|--version)   echo "devpurge ${DEVPURGE_VERSION}"; exit 0 ;;
     -h|--help)      show_help; exit 0 ;;
@@ -134,14 +156,25 @@ if [[ "$(uname)" != "Darwin" ]]; then
   exit 1
 fi
 
-# ── Banner ───────────────────────────────────────────────────────────────────
-printf "\n"
-dp_bold "  devpurge v${DEVPURGE_VERSION}"
-dp_dim "  Purge hidden dev caches on macOS"
-if [[ "$DEVPURGE_IS_ROOT" -eq 1 ]]; then
-  dp_warn "  Running as root — system-level caches enabled"
+# ── Discover mode: read-only disk overview, then exit ────────────────────────
+if [[ $OPT_DISCOVER -eq 1 ]]; then
+  printf "\n"
+  dp_bold "  devpurge v${DEVPURGE_VERSION} — discover"
+  printf "\n"
+  devpurge_discover
+  exit 0
 fi
-printf "\n"
+
+# ── Banner ───────────────────────────────────────────────────────────────────
+if [[ $OPT_JSON -eq 0 ]]; then
+  printf "\n"
+  dp_bold "  devpurge v${DEVPURGE_VERSION}"
+  dp_dim "  Purge hidden dev caches on macOS"
+  if [[ "$DEVPURGE_IS_ROOT" -eq 1 ]]; then
+    dp_warn "  Running as root — system-level caches enabled"
+  fi
+  printf "\n"
+fi
 
 # ── Phase 1: Scan ────────────────────────────────────────────────────────────
 scan_mode="default"
@@ -149,6 +182,12 @@ if [[ $OPT_AI_ONLY -eq 1 ]]; then
   scan_mode="ai"
 elif [[ $OPT_ALL -eq 1 ]]; then
   scan_mode="all"
+fi
+
+if [[ $OPT_JSON -eq 1 ]]; then
+  devpurge_scan "$scan_mode" >/dev/null 2>&1
+  devpurge_report_json
+  exit 0
 fi
 
 devpurge_scan "$scan_mode"
@@ -187,6 +226,7 @@ if [[ $OPT_YES -eq 0 ]]; then
     2)
       printf "  Enter IDs (comma-separated): "
       read -r selection
+      selection="${selection// /}"
       if [[ -z "$selection" ]]; then
         dp_warn "  No IDs entered. Cancelled."
         exit 0

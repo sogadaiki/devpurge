@@ -26,7 +26,7 @@ else
   CLR_DIM="\033[2m"
 fi
 
-DEVPURGE_VERSION="0.3.0"
+DEVPURGE_VERSION="0.4.0"
 
 # ── Print helpers ─────────────────────────────────────────────────────────────
 dp_info() {
@@ -54,7 +54,9 @@ dp_dim() {
 }
 
 # ── Size conversion ───────────────────────────────────────────────────────────
-# Convert human-readable size (e.g. "1.2G", "450M", "12K") to bytes for sorting
+# Convert human-readable size (e.g. "1.2G", "450M", "12K") to bytes for sorting.
+# DEPRECATED for scan totals: du -sh rounding makes this lossy (±50MB at G scale).
+# Scans must use _dp_size_kb (du -sk) instead. Kept for display-string parsing only.
 size_to_bytes() {
   local size="$1"
   local num unit
@@ -117,22 +119,26 @@ urlencode() {
 # ── Tier display name ────────────────────────────────────────────────────────
 tier_label() {
   case "$1" in
-    ai)      printf "${CLR_CYAN}AI-Era${CLR_RESET}" ;;
-    dev)     printf "${CLR_GREEN}DevTool${CLR_RESET}" ;;
-    caution) printf "${CLR_YELLOW}Caution${CLR_RESET}" ;;
-    project) printf "${CLR_BOLD}Project${CLR_RESET}" ;;
-    system)  printf "${CLR_RED}System${CLR_RESET}" ;;
-    *)       printf "%s" "$1" ;;
+    ai)       printf "${CLR_CYAN}AI-Era${CLR_RESET}" ;;
+    dev)      printf "${CLR_GREEN}DevTool${CLR_RESET}" ;;
+    caution)  printf "${CLR_YELLOW}Caution${CLR_RESET}" ;;
+    project)  printf "${CLR_BOLD}Project${CLR_RESET}" ;;
+    system)   printf "${CLR_RED}System${CLR_RESET}" ;;
+    worktree) printf "${CLR_CYAN}Worktree${CLR_RESET}" ;;
+    review)   printf "${CLR_DIM}Review${CLR_RESET}" ;;
+    *)        printf "%s" "$1" ;;
   esac
 }
 
 tier_label_plain() {
   case "$1" in
-    ai)      printf "AI-Era" ;;
-    dev)     printf "DevTool" ;;
-    caution) printf "Caution" ;;
-    project) printf "Project" ;;
-    system)  printf "System" ;;
-    *)       printf "%s" "$1" ;;
+    ai)       printf "AI-Era" ;;
+    dev)      printf "DevTool" ;;
+    caution)  printf "Caution" ;;
+    project)  printf "Project" ;;
+    system)   printf "System" ;;
+    worktree) printf "Worktree" ;;
+    review)   printf "Review" ;;
+    *)        printf "%s" "$1" ;;
   esac
 }

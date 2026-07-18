@@ -4,12 +4,16 @@
 # Paths excluded from scanning (populated by CLI --exclude and ~/.devpurgerc)
 DEVPURGE_EXCLUDES=()
 
-# Load exclusions from ~/.devpurgerc
-# Format: exclude=PATH (one per line, ~ expanded to $HOME)
+# Load config from ~/.devpurgerc
+# Supported keys (one per line, ~ expanded to $HOME):
+#   exclude=PATH             skip PATH (and everything under it)
+#   worktree_age_days=N      idle days before a merged worktree is deletable
+#   worktree_auto=1          allow worktree removal in unattended (-y) runs
 devpurge_load_rc() {
   local rc_file="${HOME}/.devpurgerc"
   [[ -f "$rc_file" ]] || return 0
 
+  local line
   while IFS= read -r line; do
     # Skip empty lines and comments
     [[ -z "$line" || "$line" == \#* ]] && continue
@@ -23,17 +27,30 @@ devpurge_load_rc() {
         path="${path%/}"
         [[ -n "$path" ]] && DEVPURGE_EXCLUDES+=("$path")
         ;;
+      worktree_age_days=*)
+        local days="${line#worktree_age_days=}"
+        case "$days" in
+          ''|*[!0-9]*) ;;
+          *) DEVPURGE_WORKTREE_AGE_DAYS="$days" ;;
+        esac
+        ;;
+      worktree_auto=*)
+        [[ "${line#worktree_auto=}" == "1" ]] && DEVPURGE_WORKTREE_AUTO=1
+        ;;
     esac
   done < "$rc_file"
 }
 
-# Check if a path should be excluded
+# Check if a path should be excluded (exact match or anything under it)
 # Returns 0 if excluded (should skip), 1 if not excluded
 devpurge_is_excluded() {
   local target="$1"
   [[ ${#DEVPURGE_EXCLUDES[@]} -eq 0 ]] && return 1
+  local excluded
   for excluded in "${DEVPURGE_EXCLUDES[@]}"; do
-    [[ "$target" == "$excluded" ]] && return 0
+    if [[ "$target" == "$excluded" || "$target" == "$excluded"/* ]]; then
+      return 0
+    fi
   done
   return 1
 }
