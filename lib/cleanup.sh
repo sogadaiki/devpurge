@@ -307,5 +307,12 @@ devpurge_cleanup_summary() {
     dp_warn "  Errors:  $CLEANUP_ERRORS items (permission denied or blocked)"
   fi
 
+  # APFS local snapshots pin deleted blocks until they rotate (~24h);
+  # df won't show the space immediately and that's expected
+  if [[ $CLEANUP_FREED_BYTES -gt 1073741824 ]]; then
+    dp_dim "  Note: freed space may appear in Finder/df over the next ~24h"
+    dp_dim "  (APFS local snapshots release deleted blocks as they rotate)"
+  fi
+
   printf "\n"
 }

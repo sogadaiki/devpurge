@@ -158,7 +158,15 @@ if [[ "${1:-}" == "quarantine" ]]; then
     *)
       _q_path="${1/#\~/$HOME}"
       shift
-      devpurge_quarantine_add "$_q_path" "${*:-manual}"
+      # Remaining args form the reason; drop stray global flags
+      _q_reason=""
+      for _q_arg in "$@"; do
+        case "$_q_arg" in
+          --no-color) export DEVPURGE_NO_COLOR=1 ;;
+          *) _q_reason="${_q_reason:+$_q_reason }$_q_arg" ;;
+        esac
+      done
+      devpurge_quarantine_add "$_q_path" "${_q_reason:-manual}"
       exit $?
       ;;
   esac
