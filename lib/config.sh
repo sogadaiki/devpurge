@@ -9,6 +9,8 @@ DEVPURGE_EXCLUDES=()
 #   exclude=PATH             skip PATH (and everything under it)
 #   worktree_age_days=N      idle days before a merged worktree is deletable
 #   worktree_auto=1          allow worktree removal in unattended (-y) runs
+#   protect=SUBSTRING        never delete/quarantine paths containing SUBSTRING
+#   quarantine_days=N        days quarantined items are held before expiry
 devpurge_load_rc() {
   local rc_file="${HOME}/.devpurgerc"
   [[ -f "$rc_file" ]] || return 0
@@ -36,6 +38,24 @@ devpurge_load_rc() {
         ;;
       worktree_auto=*)
         [[ "${line#worktree_auto=}" == "1" ]] && DEVPURGE_WORKTREE_AUTO=1
+        ;;
+      protect=*)
+        local pat="${line#protect=}"
+        [[ -n "$pat" ]] && DEVPURGE_PROTECT_PATTERNS+=("$pat")
+        ;;
+      quarantine_days=*)
+        local qdays="${line#quarantine_days=}"
+        case "$qdays" in
+          ''|*[!0-9]*) ;;
+          *) DEVPURGE_QUARANTINE_DAYS="$qdays" ;;
+        esac
+        ;;
+      stale_days=*)
+        local sdays="${line#stale_days=}"
+        case "$sdays" in
+          ''|*[!0-9]*) ;;
+          *) DEVPURGE_STALE_DAYS="$sdays" ;;
+        esac
         ;;
     esac
   done < "$rc_file"

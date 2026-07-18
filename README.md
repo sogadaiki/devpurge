@@ -117,11 +117,30 @@ devpurge --exclude ~/Projects/my-app/node_modules
 
 ## Cache Tiers
 
-### Worktree (v0.4.0 new — no other tool has this)
+### Protected patterns (v0.5.0 — the "never touch" guarantee)
+
+Paths containing 証拠 / 裁判 / 訴訟 / 準備書面 / 判決 / 原本 / 契約書 etc. are **structurally protected**: devpurge refuses to delete or quarantine them under any tier, any flag, any mode. Add your own with `protect=SUBSTRING` in `~/.devpurgerc`. Built for people who keep litigation evidence next to disposable dev artifacts — the tool must know the difference.
+
+### Quarantine (v0.5.0 — recoverable AI-triage staging)
+
+```bash
+devpurge quarantine ~/old-experiment "superseded by v2"   # move, don't delete
+devpurge quarantine --list                                # see what's held
+devpurge quarantine --restore Q003                        # full undo
+```
+
+Nothing judged by heuristics or AI goes straight to deletion. Quarantined items are held for 30 days (`quarantine_days=N`) with a manifest, restorable to their exact original path, and only expire on a later cleanup run. Refuses protected patterns.
+
+### Branch (v0.5.0)
+
+Local branches fully merged into the default branch, deleted with `git branch -d` only (git refuses anything unmerged). Every deleted branch's SHA is logged to `~/Library/Application Support/devpurge/logs/` first — restore any branch with `git branch <name> <sha>`.
+
+### Worktree (v0.4.0, squash-aware since v0.5.0)
 
 Agentic coding (Codex, Claude Code, etc.) leaves behind git worktrees — full checkouts with their own node_modules. devpurge finds every worktree of every repo in your project directories and classifies it:
 
 - **merged + clean + idle 7d+** → removable, via `git worktree remove` (never `rm -rf`)
+- **squash-merged + clean + idle** → also removable — `git cherry` patch-equivalence catches branches that agentic tools (Codex etc.) squash-merged, which look "unmerged" to naive ancestor checks
 - **stale records** → `git worktree prune`
 - **unmerged / dirty / locked / recently active / contains `.env*`** → *reported only, never touched*
 
@@ -130,6 +149,11 @@ Unattended runs (`-y`, e.g. cron) skip worktree removal entirely unless you opt 
 ### Review (v0.4.0 new — reported, NEVER deleted)
 
 Large user data that a cleanup tool has no business deleting, but that you should know about: Downloads, Movies, screen recordings on the Desktop, AI session histories (`~/.codex/sessions`, `~/.claude/projects`), browser-automation profiles, Time Machine local snapshots. devpurge shows them with sizes and lets *you* decide.
+
+v0.5.0 adds two detectors here:
+
+- **Stray duplicates**: same-name same-size files ≥50MB across your user dirs — Unicode-normalization-aware, and smart enough to skip the same repo file seen through multiple git worktrees
+- **Stale files**: files ≥100MB not *opened* in 90+ days (`stale_days=N`), via Spotlight's `kMDItemLastUsedDate` — a real "did I ever look at this again" signal, not just mtime
 
 ### AI-Era
 

@@ -17,7 +17,10 @@ macOS向けキャッシュ削除CLIツール。
 - `bin/devpurge` — エントリポイント（フラグ解析、フェーズ制御）
 - `lib/paths.sh` — ターゲット定義（tier: ai / dev / caution / system + review + ホワイトリスト）
 - `lib/scan.sh` — スキャン（静的 + node_modules/.next動的 + misc/Electron/Containerキャッシュ自動検出 + review）
-- `lib/worktree.sh` — stale git worktree検出（merged+clean+idle→削除可、それ以外→review報告のみ）
+- `lib/worktree.sh` — stale git worktree検出（merged/squash-merged+clean+idle→削除可、それ以外→review報告のみ。squashはgit cherryのpatch同値で判定）
+- `lib/branches.sh` — マージ済みブランチ削除（git branch -dのみ、SHA復元ログをApp Support/devpurge/logs/へ）
+- `lib/quarantine.sh` — 隔離（mv+manifest、30日猶予、restore可）+ 保護パターン（証拠/裁判/訴訟等は絶対不可侵。rc protect=で追加）
+- `lib/dupes.sh` — 同名同サイズ複製検出（NFC正規化・worktree同一ファイル除外）+ Spotlight未使用日レポート
 - `lib/cleanup.sh` — 削除（ホワイトリスト + rm guard + review拒否 + worktreeはgit経由 + --trash対応）
 - `lib/report.sh` — レポート表示 + `--json` 出力
 - `lib/discover.sh` — `--discover`（$HOME大物一覧、読み取り専用）

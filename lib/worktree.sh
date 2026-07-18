@@ -123,19 +123,34 @@ _dp_classify_worktree() {
     wt_head=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
     if [[ -z "$wt_head" ]]; then
       state="unreadable"
-    elif git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_branch" 2>/dev/null; then
-      # Merged + clean. Check idle age before calling it safe.
-      local head_epoch
-      head_epoch=$(git -C "$wt" log -1 --format=%ct 2>/dev/null)
-      if [[ -n "$head_epoch" && $((now_epoch - head_epoch)) -ge "$max_age_sec" ]]; then
-        tier="worktree"
-        meta="remove:${repo}"
-        state="merged, clean, idle ${DEVPURGE_WORKTREE_AGE_DAYS}d+"
-      else
-        state="merged but recently active"
-      fi
     else
-      state="unmerged branch"
+      local merge_kind=""
+      if git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_branch" 2>/dev/null; then
+        merge_kind="merged"
+      else
+        # Squash-merge detection: `git cherry` marks commits whose patch
+        # already exists upstream with "-". All "-" = effectively merged.
+        local cherry
+        cherry=$(git -C "$repo" cherry "$default_branch" "$wt_head" 2>/dev/null || true)
+        if [[ -n "$cherry" ]] && ! printf '%s\n' "$cherry" | grep -q '^+'; then
+          merge_kind="squash-merged"
+        fi
+      fi
+
+      if [[ -n "$merge_kind" ]]; then
+        # Merged + clean. Check idle age before calling it safe.
+        local head_epoch
+        head_epoch=$(git -C "$wt" log -1 --format=%ct 2>/dev/null)
+        if [[ -n "$head_epoch" && $((now_epoch - head_epoch)) -ge "$max_age_sec" ]]; then
+          tier="worktree"
+          meta="remove:${repo}"
+          state="${merge_kind}, clean, idle ${DEVPURGE_WORKTREE_AGE_DAYS}d+"
+        else
+          state="${merge_kind} but recently active"
+        fi
+      else
+        state="unmerged branch"
+      fi
     fi
   fi
 
@@ -180,6 +195,9 @@ devpurge_scan_worktrees() {
       seen_repos="${seen_repos}|${repo}|"
 
       _dp_scan_repo_worktrees "$repo"
+      if [[ "${DEVPURGE_SKIP_BRANCHES:-}" != "1" ]]; then
+        _dp_scan_repo_branches "$repo"
+      fi
     done < <(find "$search_path" -maxdepth 3 -name .git 2>/dev/null)
   done
   return 0

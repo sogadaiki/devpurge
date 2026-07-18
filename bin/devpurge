@@ -37,12 +37,18 @@ source "${DEVPURGE_DIR}/lib/config.sh"
 source "${DEVPURGE_DIR}/lib/paths.sh"
 # shellcheck source=../lib/worktree.sh
 source "${DEVPURGE_DIR}/lib/worktree.sh"
+# shellcheck source=../lib/branches.sh
+source "${DEVPURGE_DIR}/lib/branches.sh"
+# shellcheck source=../lib/dupes.sh
+source "${DEVPURGE_DIR}/lib/dupes.sh"
 # shellcheck source=../lib/scan.sh
 source "${DEVPURGE_DIR}/lib/scan.sh"
 # shellcheck source=../lib/report.sh
 source "${DEVPURGE_DIR}/lib/report.sh"
 # shellcheck source=../lib/discover.sh
 source "${DEVPURGE_DIR}/lib/discover.sh"
+# shellcheck source=../lib/quarantine.sh
+source "${DEVPURGE_DIR}/lib/quarantine.sh"
 # shellcheck source=../lib/cleanup.sh
 source "${DEVPURGE_DIR}/lib/cleanup.sh"
 # shellcheck source=../lib/share.sh
@@ -65,6 +71,10 @@ devpurge - Purge hidden dev caches on macOS
 
 USAGE
   devpurge [OPTIONS]
+  devpurge quarantine <path> [reason]   Move a path into quarantine (30d grace)
+  devpurge quarantine --list            Show quarantined items
+  devpurge quarantine --restore <ID>    Restore an item to its original path
+  devpurge quarantine --expire          Delete items past the grace period
 
 OPTIONS
   -n, --dry-run       Scan only, don't delete anything
@@ -95,19 +105,64 @@ CACHE TIERS
   DevTool   npm, Homebrew, Chrome, VS Code, pip, Cargo, Gradle, Xcode
             + auto-detected app caches (Electron/Container/misc)
   Project   node_modules / .next in development projects (再インストールで復元)
-  Worktree  merged & idle git worktrees (removed via git, never rm -rf)
+  Worktree  merged/squash-merged & idle git worktrees (removed via git)
+  Branch    local branches merged into main (git branch -d, SHAs logged)
   Caution   Notion, Discord, Slack, Adobe, Steam, AI models (--all to include)
-  Review    large user data - reported only, NEVER deleted (Downloads, sessions)
+  Review    large user data - reported only, NEVER deleted (Downloads,
+            sessions, duplicates, files unopened 90d+)
   System    sleepimage, diagnostics, OS updates (sudo only)
+
+SAFETY
+  Paths containing 証拠/裁判/訴訟/準備書面/判決/原本 etc. are protected:
+  devpurge refuses to delete or quarantine them, ever. Add your own with
+  protect=SUBSTRING in ~/.devpurgerc.
 
 CONFIG (~/.devpurgerc)
   exclude=~/path            # skip path and everything under it
   worktree_age_days=7       # idle days before merged worktrees are deletable
+  worktree_auto=1           # allow worktree removal in unattended (-y) runs
+  protect=SUBSTRING         # never touch paths containing SUBSTRING
+  quarantine_days=30        # grace period before quarantined items expire
+  stale_days=90             # "not opened in N days" report threshold
 
 MORE INFO
   https://github.com/sogadaiki/devpurge
 HELP
 }
+
+# ── Subcommand: devpurge quarantine ──────────────────────────────────────────
+if [[ "${1:-}" == "quarantine" ]]; then
+  shift
+  devpurge_load_rc
+  case "${1:-}" in
+    --list|"")
+      devpurge_quarantine_list
+      exit $?
+      ;;
+    --restore)
+      if [[ -z "${2:-}" ]]; then
+        dp_error "Usage: devpurge quarantine --restore <ID>"
+        exit 1
+      fi
+      devpurge_quarantine_restore "$2"
+      exit $?
+      ;;
+    --expire)
+      devpurge_quarantine_expire
+      exit $?
+      ;;
+    -*)
+      dp_error "Unknown quarantine option: $1"
+      exit 1
+      ;;
+    *)
+      _q_path="${1/#\~/$HOME}"
+      shift
+      devpurge_quarantine_add "$_q_path" "${*:-manual}"
+      exit $?
+      ;;
+  esac
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -199,6 +254,7 @@ fi
 
 # ── Dry run: stop here ───────────────────────────────────────────────────────
 if [[ $OPT_DRY_RUN -eq 1 ]]; then
+  devpurge_quarantine_expire dry
   dp_dim "  Dry run mode - nothing was deleted."
   dp_dim "  Run without -n to clean up."
   printf "\n"
@@ -245,6 +301,7 @@ fi
 
 # ── Phase 4: Execute ─────────────────────────────────────────────────────────
 devpurge_cleanup "$selection"
+devpurge_quarantine_expire
 devpurge_cleanup_summary
 
 # ── Phase 5: Share ───────────────────────────────────────────────────────────

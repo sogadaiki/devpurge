@@ -8,6 +8,7 @@ SCAN_TOTAL_BYTES=0
 SCAN_REVIEW_BYTES=0
 WT_COUNT=0
 RV_COUNT=0
+BR_COUNT=0
 # Roots of worktrees marked deletable (project scan skips inside these)
 DEVPURGE_WT_ROOTS=()
 
@@ -303,6 +304,7 @@ devpurge_scan() {
   SCAN_REVIEW_BYTES=0
   WT_COUNT=0
   RV_COUNT=0
+  BR_COUNT=0
   DEVPURGE_WT_ROOTS=()
 
   dp_info "Scanning cache directories..."
@@ -374,6 +376,13 @@ devpurge_scan() {
   # Report-only review targets
   if [[ "$mode" != "ai" && "${DEVPURGE_SKIP_REVIEW:-}" != "1" ]]; then
     _dp_scan_review_targets
+    printf "\r%-80s\r" " "
+  fi
+
+  # Duplicate candidates and stale unused files (report-only)
+  if [[ "$mode" != "ai" && "${DEVPURGE_SKIP_DUPES:-}" != "1" ]]; then
+    _dp_scan_duplicates
+    _dp_scan_stale_unused
     printf "\r%-80s\r" " "
   fi
 

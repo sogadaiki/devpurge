@@ -61,13 +61,18 @@ export DEVPURGE_SKIP_NODE_MODULES=1
 export DEVPURGE_SKIP_MISC_CACHES=1
 export DEVPURGE_SKIP_WORKTREES=1
 export DEVPURGE_SKIP_REVIEW=1
+export DEVPURGE_SKIP_BRANCHES=1
+export DEVPURGE_SKIP_DUPES=1
 source "${PROJECT_DIR}/lib/utils.sh"
 source "${PROJECT_DIR}/lib/config.sh"
 source "${PROJECT_DIR}/lib/paths.sh"
 source "${PROJECT_DIR}/lib/worktree.sh"
+source "${PROJECT_DIR}/lib/branches.sh"
+source "${PROJECT_DIR}/lib/dupes.sh"
 source "${PROJECT_DIR}/lib/scan.sh"
 source "${PROJECT_DIR}/lib/report.sh"
 source "${PROJECT_DIR}/lib/cleanup.sh"
+source "${PROJECT_DIR}/lib/quarantine.sh"
 source "${PROJECT_DIR}/lib/share.sh"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -464,6 +469,165 @@ rm -rf "$SYM_OUTSIDE"
 DEVPURGE_WHITELIST=("${DEVPURGE_WHITELIST_BACKUP4[@]}")
 
 # ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_protected ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+assert_exit_code "protected: 証拠 path" 0 devpurge_is_protected "${HOME}/Desktop/案件/証拠保全/video.mp4"
+assert_exit_code "protected: 準備書面" 0 devpurge_is_protected "${HOME}/Documents/準備書面_v3.docx"
+assert_exit_code "protected: 原本" 0 devpurge_is_protected "${HOME}/Movies/動画原本_20260613.mp4"
+assert_exit_code "not protected: cache path" 1 devpurge_is_protected "${HOME}/Library/Caches/npm"
+assert_exit_code "not protected: legalchecker repo" 1 devpurge_is_protected "${HOME}/Desktop/development/new-legalchecker/frontend/node_modules"
+
+# rc protect= extension
+DEVPURGE_PROTECT_PATTERNS+=("my-precious")
+assert_exit_code "protected: custom pattern" 0 devpurge_is_protected "${HOME}/Desktop/my-precious-data"
+
+# Cleanup refuses protected entries even when whitelisted and selected
+PROT_TMP="${HOME}/.devpurge-test-prot-$$"
+mkdir -p "${PROT_TMP}/証拠データ"
+dd if=/dev/zero of="${PROT_TMP}/証拠データ/file1" bs=1024 count=10 2>/dev/null
+DEVPURGE_WHITELIST_BACKUP5=("${DEVPURGE_WHITELIST[@]}")
+DEVPURGE_WHITELIST=("${PROT_TMP}/")
+SCAN_RESULTS=("P01|${PROT_TMP}/証拠データ|dev|Protected test|10K|10240|")
+devpurge_cleanup "all" >/dev/null 2>&1
+
+TOTAL=$((TOTAL + 1))
+if [[ -d "${PROT_TMP}/証拠データ" ]]; then
+  printf "  PASS: cleanup refuses protected path\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: protected path was deleted\n"
+  FAIL=$((FAIL + 1))
+fi
+rm -rf "$PROT_TMP"
+DEVPURGE_WHITELIST=("${DEVPURGE_WHITELIST_BACKUP5[@]}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_quarantine ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+Q_TMP="${HOME}/.devpurge-test-q-$$"
+mkdir -p "${Q_TMP}/target"
+dd if=/dev/zero of="${Q_TMP}/target/file1" bs=1024 count=100 2>/dev/null
+DEVPURGE_QUARANTINE_DIR="${Q_TMP}/quarantine"
+DEVPURGE_QUARANTINE_DAYS=30
+
+# add
+devpurge_quarantine_add "${Q_TMP}/target" "test reason" >/dev/null 2>&1
+TOTAL=$((TOTAL + 1))
+if [[ ! -d "${Q_TMP}/target" && -d "${DEVPURGE_QUARANTINE_DIR}/Q001-target" ]]; then
+  printf "  PASS: quarantine add moves target\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: quarantine add did not move target\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# list shows entry
+q_list=$(devpurge_quarantine_list 2>/dev/null)
+assert_contains "quarantine list shows ID" "Q001" "$q_list"
+assert_contains "quarantine list shows reason" "test reason" "$q_list"
+
+# protected path refused
+mkdir -p "${Q_TMP}/裁判資料"
+assert_exit_code "quarantine refuses protected path" 1 devpurge_quarantine_add "${Q_TMP}/裁判資料" "should fail"
+rm -rf "${Q_TMP}/裁判資料"
+
+# restore
+devpurge_quarantine_restore "Q001" >/dev/null 2>&1
+TOTAL=$((TOTAL + 1))
+if [[ -d "${Q_TMP}/target" && -f "${Q_TMP}/target/file1" ]]; then
+  printf "  PASS: quarantine restore returns target\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: quarantine restore failed\n"
+  FAIL=$((FAIL + 1))
+fi
+
+# expire: re-add, backdate the manifest, expire
+devpurge_quarantine_add "${Q_TMP}/target" "expire test" >/dev/null 2>&1
+old_epoch=$(( $(date +%s) - 40 * 86400 ))
+sed -i '' "s/^Q002	[0-9]*	/Q002	${old_epoch}	/" "${DEVPURGE_QUARANTINE_DIR}/manifest.tsv"
+devpurge_quarantine_expire >/dev/null 2>&1
+TOTAL=$((TOTAL + 1))
+if [[ ! -e "${DEVPURGE_QUARANTINE_DIR}/Q002-target" ]]; then
+  printf "  PASS: quarantine expire deletes old entries\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: expired entry still present\n"
+  FAIL=$((FAIL + 1))
+fi
+
+rm -rf "$Q_TMP"
+unset DEVPURGE_QUARANTINE_DIR
+
+# ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_branches ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+BR_TMP="${HOME}/.devpurge-test-br-$$"
+mkdir -p "${BR_TMP}/repo"
+git -C "${BR_TMP}/repo" init -q -b main
+git -C "${BR_TMP}/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+git -C "${BR_TMP}/repo" branch merged-branch
+git -C "${BR_TMP}/repo" checkout -q -b unmerged-branch
+git -C "${BR_TMP}/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m extra
+git -C "${BR_TMP}/repo" checkout -q main
+
+DEVPURGE_LOG_DIR="${BR_TMP}/logs"
+devpurge_delete_merged_branches "${BR_TMP}/repo" "main"
+assert_eq "merged branch deleted count" "1" "$DELETED_BRANCH_COUNT"
+
+TOTAL=$((TOTAL + 1))
+if git -C "${BR_TMP}/repo" show-ref --verify --quiet refs/heads/unmerged-branch; then
+  printf "  PASS: unmerged branch survives\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: unmerged branch was deleted\n"
+  FAIL=$((FAIL + 1))
+fi
+
+TOTAL=$((TOTAL + 1))
+if grep -q "merged-branch" "${DEVPURGE_LOG_DIR}"/deleted-branches-*.tsv 2>/dev/null; then
+  printf "  PASS: deleted branch SHA logged for restore\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: no restore log written\n"
+  FAIL=$((FAIL + 1))
+fi
+rm -rf "$BR_TMP"
+
+# ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_squash_merge ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+SQ_TMP="${HOME}/.devpurge-test-sq-$$"
+mkdir -p "${SQ_TMP}/repo"
+git -C "${SQ_TMP}/repo" init -q -b main
+git -C "${SQ_TMP}/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+git -C "${SQ_TMP}/repo" worktree add -q "${SQ_TMP}/wt-squash" -b feat-squash
+dd if=/dev/zero of="${SQ_TMP}/wt-squash/blob" bs=1024 count=2048 2>/dev/null
+git -C "${SQ_TMP}/wt-squash" add blob
+git -C "${SQ_TMP}/wt-squash" -c user.name=t -c user.email=t@t commit -q -m "add blob"
+# Squash-merge into main (no merge commit, so is-ancestor is false)
+git -C "${SQ_TMP}/repo" merge --squash feat-squash >/dev/null 2>&1
+git -C "${SQ_TMP}/repo" -c user.name=t -c user.email=t@t commit -q -m "squashed: add blob"
+
+SCAN_RESULTS=()
+WT_COUNT=0
+RV_COUNT=0
+DEVPURGE_WT_ROOTS=()
+DEVPURGE_WORKTREE_AGE_DAYS=0
+_dp_scan_repo_worktrees "${SQ_TMP}/repo" >/dev/null
+
+sq_deletable=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "squash-merged, clean" || true)
+assert_eq "squash-merged worktree detected as deletable" "1" "$sq_deletable"
+
+git -C "${SQ_TMP}/repo" worktree remove --force "${SQ_TMP}/wt-squash" >/dev/null 2>&1 || true
+rm -rf "$SQ_TMP"
+DEVPURGE_WORKTREE_AGE_DAYS=7
+
+# ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== test_json ===\n\n"
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -493,7 +657,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.4.0" "$version_output"
+assert_contains "version output" "devpurge 0.5.0" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)

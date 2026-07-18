@@ -103,6 +103,30 @@ devpurge_cleanup() {
       fi
     fi
 
+    # ── Protected patterns: legal material etc. is never deleted ─────────────
+    if devpurge_is_protected "$path"; then
+      dp_error "  BLOCKED: $path matches a protected pattern"
+      CLEANUP_LOG+=("${id}|BLOCKED|0|${desc}|Protected pattern")
+      CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+      continue
+    fi
+
+    # ── Branch entries: delete merged branches via git, log SHAs first ───────
+    if [[ "$tier" == "branch" ]]; then
+      local br_default="${meta#branches:}"
+      printf "  Deleting merged branches (%s)..." "$(basename "$path")"
+      if devpurge_delete_merged_branches "$path" "$br_default"; then
+        printf " ${CLR_GREEN}%d deleted${CLR_RESET}\n" "$DELETED_BRANCH_COUNT"
+        CLEANUP_LOG+=("${id}|OK|0|${desc}|${DELETED_BRANCH_COUNT} branches deleted (SHAs logged)")
+        CLEANUP_DELETED=$((CLEANUP_DELETED + 1))
+      else
+        printf " ${CLR_RED}failed${CLR_RESET}\n"
+        CLEANUP_LOG+=("${id}|FAIL|0|${desc}|Branch cleanup failed")
+        CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+      fi
+      continue
+    fi
+
     # ── Worktree entries: handled by git, not rm ─────────────────────────────
     if [[ "$tier" == "worktree" ]]; then
       local action="${meta%%:*}"
