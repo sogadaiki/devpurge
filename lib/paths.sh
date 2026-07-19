@@ -108,6 +108,10 @@ DEVPURGE_REVIEW_PATHS=(
   "V10|${HOME}/.claude-backup|review|Claude settings backup (delete manually if obsolete)"
   "V11|${HOME}/.dev-browser|review|dev-browser profiles (may hold logins; superseded by agent-browser)"
   "V12|${HOME}/.gemini/antigravity-backup|review|Antigravity IDE backup copy (delete manually if obsolete)"
+  "V13|${HOME}/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data|review|OrbStack VM data (use: docker system prune inside OrbStack)"
+  "V14|${HOME}/.colima|review|Colima VM data (deleting destroys all containers)"
+  "V15|${HOME}/.lima|review|Lima VM data (deleting destroys all VMs)"
+  "V16|${HOME}/Library/Containers/com.utmapp.UTM/Data/Documents|review|UTM virtual machines (user-created VMs)"
 )
 
 # ── Tier 4: System (sudo devpurge only) ─────────────────────────────────────

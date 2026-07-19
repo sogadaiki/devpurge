@@ -44,6 +44,8 @@ _dp_scan_project_dirs() {
   local target_name="$1" id_prefix="$2" desc_template="$3"
   local search_dirs=(Desktop Documents Projects Developer src repos code dev workspace work)
   local count=0
+  local now_epoch
+  now_epoch=$(date +%s)
 
   for dir_name in "${search_dirs[@]}"; do
     local search_path="${HOME}/${dir_name}"
@@ -80,6 +82,16 @@ _dp_scan_project_dirs() {
       repo_name=$(basename "$(dirname "$found_path")")
       # shellcheck disable=SC2059
       desc=$(printf "$desc_template" "$repo_name")
+
+      # kondo-style staleness hint: how long since the project itself moved
+      local proj_mtime idle_days
+      proj_mtime=$(stat -f %m "$(dirname "$found_path")" 2>/dev/null || echo 0)
+      if [[ "$proj_mtime" -gt 0 ]]; then
+        idle_days=$(( (now_epoch - proj_mtime) / 86400 ))
+        if [[ "$idle_days" -ge 30 ]]; then
+          desc="${desc} - project idle ${idle_days}d"
+        fi
+      fi
 
       _dp_add_result "$id" "$found_path" "project" "$desc" "$size_kb"
 

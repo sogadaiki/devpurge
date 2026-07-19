@@ -666,6 +666,42 @@ rm -rf "$SQ_TMP"
 DEVPURGE_WORKTREE_AGE_DAYS=7
 
 # ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_ignored_unique ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+IG_TMP="${HOME}/.devpurge-test-ig-$$"
+mkdir -p "${IG_TMP}/repo"
+git -C "${IG_TMP}/repo" init -q -b main
+printf "node_modules/\n*.sqlite\n" > "${IG_TMP}/repo/.gitignore"
+git -C "${IG_TMP}/repo" add .gitignore
+git -C "${IG_TMP}/repo" -c user.name=t -c user.email=t@t commit -q -m init
+git -C "${IG_TMP}/repo" worktree add -q "${IG_TMP}/wt-ig" -b feat-ig
+dd if=/dev/zero of="${IG_TMP}/wt-ig/blob" bs=1024 count=2048 2>/dev/null
+git -C "${IG_TMP}/wt-ig" add blob
+git -C "${IG_TMP}/wt-ig" -c user.name=t -c user.email=t@t commit -q -m blob
+git -C "${IG_TMP}/repo" merge -q feat-ig >/dev/null 2>&1
+
+# Regenerable ignored content only -> still deletable
+mkdir -p "${IG_TMP}/wt-ig/node_modules/pkg"
+echo "x" > "${IG_TMP}/wt-ig/node_modules/pkg/i.js"
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+DEVPURGE_WORKTREE_AGE_DAYS=0
+_dp_scan_repo_worktrees "${IG_TMP}/repo" >/dev/null
+ig_ok=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "merged, clean, idle" || true)
+assert_eq "regenerable ignored content stays deletable" "1" "$ig_ok"
+
+# One-of-a-kind ignored file -> demoted to review
+echo "unique data" > "${IG_TMP}/wt-ig/localdata.sqlite"
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${IG_TMP}/repo" >/dev/null
+ig_demoted=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "has ignored files" || true)
+assert_eq "unique ignored file demotes to review" "1" "$ig_demoted"
+
+git -C "${IG_TMP}/repo" worktree remove --force "${IG_TMP}/wt-ig" >/dev/null 2>&1 || true
+rm -rf "$IG_TMP"
+DEVPURGE_WORKTREE_AGE_DAYS=7
+
+# ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== test_json ===\n\n"
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -695,7 +731,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.5.1" "$version_output"
+assert_contains "version output" "devpurge 0.5.2" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)

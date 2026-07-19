@@ -162,9 +162,20 @@ _dp_classify_worktree() {
         local head_epoch
         head_epoch=$(git -C "$wt" log -1 --format=%ct 2>/dev/null)
         if [[ -n "$head_epoch" && $((now_epoch - head_epoch)) -ge "$max_age_sec" ]]; then
-          tier="worktree"
-          meta="remove:${repo}"
-          state="${merge_kind}, clean, idle ${DEVPURGE_WORKTREE_AGE_DAYS}d+"
+          # git-clean is blind to ignored files. Regenerable classes
+          # (node_modules, build output, caches) are fine to lose with the
+          # worktree; anything else ignored might be one-of-a-kind data.
+          local ignored_unique
+          ignored_unique=$(git -C "$wt" ls-files --others -i --exclude-standard 2>/dev/null | \
+            grep -vE '(^|/)(node_modules|\.next|dist|build|out|\.wrangler|\.turbo|\.cache|coverage|__pycache__|\.venv|venv|\.pytest_cache)(/|$)' | \
+            grep -vE '(^|/)\.DS_Store$|\.log$' | head -1 || true)
+          if [[ -n "$ignored_unique" ]]; then
+            state="${merge_kind} but has ignored files (e.g. $(basename "$ignored_unique"))"
+          else
+            tier="worktree"
+            meta="remove:${repo}"
+            state="${merge_kind}, clean, idle ${DEVPURGE_WORKTREE_AGE_DAYS}d+"
+          fi
         else
           state="${merge_kind} but recently active"
         fi
