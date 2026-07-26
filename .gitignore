@@ -3,3 +3,11 @@
 *.swo
 *~
 restart/
+
+# 共有デザイン正本のコピー / セッション再開メモ（2026-07-26 追加）
+# DESIGN.md の保守元は /Users/daiki12/.claude/DESIGN.md（install スクリプトで配布）。
+# restart.md は作業者のしおりでリポの成果物ではない。
+# どちらもリポによって方針が割れるためグローバル除外にはせず、ここで個別に止める。
+# 詳細: /Users/daiki12/Desktop/development/sadame-ops/docs/dirty-state-policy.md
+DESIGN.md
+restart.md
