@@ -163,6 +163,8 @@ Three detectors live here (v0.5.0, reworked in v0.6.0):
 - **Older versions**: explicit version siblings in one folder — `foo.mp4` / `foo-v2.mp4` / `foo_final.mp4` / `foo (1).zip` / `foo 2.png` / `資料のコピー.pdf` — everything but the newest by modification time is listed. Identical copies at the same relative path in linked worktrees count once; different contents or separate repositories remain separate. Bare `_1`/`_2` suffixes are deliberately ignored (camera splits and numbered series are not versions)
 - **Stale files**: files ≥100MB not *opened* in 90+ days (`stale_days=N`), via Spotlight's `kMDItemLastUsedDate` — a real "did I ever look at this again" signal, not just mtime
 
+The optional weekly script (`scripts/triage-weekly.sh`) reports the scan, recent confirmed worktree removals and quarantine deadlines. When Claude authentication, quota or output fails, it falls back to a factual summary and labels AI analysis as unavailable. Neither path deletes or quarantines files. Test without posting with `DEVPURGE_TRIAGE_DRY=1 bash scripts/triage-weekly.sh`; the resulting draft is saved to `/tmp/devpurge-triage/report.md`. Runtime logs live in `~/Library/Application Support/devpurge/logs/`.
+
 ### AI-Era
 
 Claude Desktop VM bundles, Claude Code CLI/plugin/debug caches, Codex CLI runtime cache, Gemini CLI temp sessions, Cursor, Codeium, Kiro, uv, Playwright, Puppeteer, Bun.

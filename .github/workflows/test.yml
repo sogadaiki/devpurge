@@ -20,6 +20,9 @@ jobs:
       - name: Run tests
         run: bash test/run_tests.sh
 
+      - name: Verify weekly report fallback
+        run: python3 test/test_triage_report.py
+
       - name: Verify --help
         run: ./bin/devpurge --help
 

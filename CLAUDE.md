@@ -26,6 +26,7 @@ macOS向けキャッシュ削除CLIツール。
 - `lib/discover.sh` — `--discover`（$HOME大物一覧、読み取り専用）
 - `lib/config.sh` — ~/.devpurgerc（exclude= プレフィックス除外、worktree_age_days=）
 - `lib/utils.sh` — ユーティリティ（色、サイズ変換、バージョン、PATH正規化）
+- `scripts/triage-weekly.sh` / `triage-report.py` — 週次レポート。AI認証・上限・応答失敗時は明示した定型集計へfallback。DRY=1は通知を送らずreport.md保存まで
 - `test/run_tests.sh` — テストスイート（実ディスクスキャンはDEVPURGE_SKIP_*で全て無効化）
 
 ## Key Design Decisions

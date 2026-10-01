@@ -13,10 +13,11 @@ export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/
 export HOME="${HOME:-/Users/daiki12}"
 
 DEVPURGE_BIN="${DEVPURGE_BIN:-/usr/local/bin/devpurge}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_BIN="${DEVPURGE_TRIAGE_CLAUDE_BIN:-${HOME}/.local/bin/claude}"
 WORK_DIR="${DEVPURGE_TRIAGE_WORK_DIR:-/tmp/devpurge-triage}"
 # ~/Library/Logs は devpurge 自身の掃除対象(D22)なので、ログはApp Support側に置く
-LOG_DIR="${HOME}/Library/Application Support/devpurge/logs"
+LOG_DIR="${DEVPURGE_LOG_DIR:-${HOME}/Library/Application Support/devpurge/logs}"
 DISCORD_NOTIFY="${HOME}/.mai/scripts/discord-notify.mjs"
 DRY="${DEVPURGE_TRIAGE_DRY:-0}"
 
@@ -37,7 +38,7 @@ if ! "$DEVPURGE_BIN" --json > "${WORK_DIR}/scan.json" 2>"${WORK_DIR}/scan.err"; 
   notify_error "devpurge --json が失敗。ログ: ${WORK_DIR}/scan.err"
   exit 1
 fi
-if ! python3 -c "import json;json.load(open('${WORK_DIR}/scan.json'))" 2>/dev/null; then
+if ! python3 -c 'import json,sys;json.load(open(sys.argv[1]))' "${WORK_DIR}/scan.json" 2>/dev/null; then
   notify_error "devpurge --json の出力がJSONとして不正"
   exit 1
 fi
@@ -80,13 +81,10 @@ p.write_text(p.read_text().replace('/tmp/devpurge-triage/', sys.argv[2] + '/'))
 PY
 
 CLAUDE_OUT="${WORK_DIR}/claude-out.json"
-if ! "$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" --model sonnet --output-format json > "$CLAUDE_OUT" 2>"${WORK_DIR}/claude.err"; then
-  notify_error "claude -p 実行失敗。ログ: ${WORK_DIR}/claude.err"
-  exit 1
-fi
-
-# 成功判定: is_error=false かつ result非空 (exit 0 ≠ 成功。refusal対策)
-REPORT=$(python3 - "$CLAUDE_OUT" <<'PY'
+REPORT=""
+if "$CLAUDE_BIN" -p "$(cat "$PROMPT_FILE")" --model sonnet --output-format json > "$CLAUDE_OUT" 2>"${WORK_DIR}/claude.err"; then
+  # exit 0だけで成功とせず、is_errorと空応答も確認する。
+  REPORT=$(python3 - "$CLAUDE_OUT" <<'PY'
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
@@ -96,7 +94,16 @@ if d.get("is_error") or not str(d.get("result", "")).strip():
     sys.exit(1)
 print(str(d["result"])[:1800])
 PY
-) || { notify_error "claude -p が空応答/エラー応答 (refusalの可能性)。${CLAUDE_OUT} を確認"; exit 1; }
+) || REPORT=""
+fi
+if [ -z "$REPORT" ]; then
+  printf '%s AI unavailable; using factual summary (see %s)\n' "$(date '+%Y-%m-%d %H:%M')" "$CLAUDE_OUT" >> "${LOG_DIR}/devpurge-triage.log"
+  REPORT=$(python3 "${SCRIPT_DIR}/triage-report.py" "$WORK_DIR") || {
+    notify_error "定型集計も失敗。${WORK_DIR} のスキャン結果を確認"
+    exit 1
+  }
+fi
+printf '%s\n' "$REPORT" > "${WORK_DIR}/report.md"
 
 # ── 3. Discord投稿 ───────────────────────────────────────────────────────────
 if [ "$DRY" = "1" ]; then

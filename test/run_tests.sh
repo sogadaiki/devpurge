@@ -838,6 +838,19 @@ assert_contains "Japanese copy marker groups with original" "a/資料.pdf|review
 assert_eq "bare _N parts are not versions" "0" "$(printf '%s\n' "$dv_ver" | grep -c 'clip_' || true)"
 assert_eq "marker must follow a separator (semifinal)" "0" "$(printf '%s\n' "$dv_ver" | grep -c 'semi' || true)"
 
+# Finder/filesystems may return decomposed dakuten (NFD); preserve real paths
+# while recognizing the normalized Japanese copy suffix.
+mkdir -p "${DV_TMP}/nfd"
+dv_nfd_copy=$(printf '資料のコヒ\343\202\232ー.pdf')
+cp "${DV_TMP}/a/資料.pdf" "${DV_TMP}/nfd/資料.pdf"
+cp "${DV_TMP}/a/資料.pdf" "${DV_TMP}/nfd/${dv_nfd_copy}"
+touch -t 202601010000 "${DV_TMP}/nfd/資料.pdf"
+touch -t 202602010000 "${DV_TMP}/nfd/${dv_nfd_copy}"
+SCAN_RESULTS=(); RV_COUNT=0
+_dp_scan_versions "${DV_TMP}/nfd"
+dv_nfd_out=$(printf '%s\n' "${SCAN_RESULTS[@]+"${SCAN_RESULTS[@]}"}")
+assert_contains "decomposed Japanese copy marker is recognized" 'nfd/資料.pdf|review|older version (newest:' "$dv_nfd_out"
+
 # Repeated worktree copies count once, while other repositories and changed
 # bytes at the same relative path remain distinct review candidates.
 git -C "${DV_TMP}/a" init -q -b main

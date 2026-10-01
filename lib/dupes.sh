@@ -163,12 +163,16 @@ _dp_scan_versions() {
     for dir in "${search_dirs[@]}"; do
       [[ -d "$dir" ]] || continue
       _dp_user_find "$dir" -size +2048 | \
-        while IFS= read -r f; do stat -f "%m|%z|%N" "$f" 2>/dev/null; done
-    done | awk -F'|' '
-      NF != 3 { next }
+        while IFS= read -r f; do
+          local record
+          record=$(stat -f "%m|%z|%N" "$f" 2>/dev/null) || continue
+          printf '%s|%s\n' "$record" "$(_dp_nfc "${f##*/}")"
+        done
+    done | LC_ALL=C awk -F'|' '
+      NF != 4 { next }
       {
-        path = $3; n = split(path, seg, "/"); name = seg[n]
-        d = substr(path, 1, length(path) - length(name))
+        path = $3; n = split(path, seg, "/"); name = $4
+        d = substr(path, 1, length(path) - length(seg[n]))
         dot = 0
         for (i = length(name); i > 1; i--) if (substr(name, i, 1) == ".") { dot = i; break }
         if (dot == 0) next
