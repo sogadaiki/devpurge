@@ -26,7 +26,7 @@ else
   CLR_DIM="\033[2m"
 fi
 
-DEVPURGE_VERSION="0.5.2"
+DEVPURGE_VERSION="0.6.0"
 
 # ── Print helpers ─────────────────────────────────────────────────────────────
 dp_info() {

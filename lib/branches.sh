@@ -17,6 +17,16 @@ _dp_merged_branches() {
   local checked_out
   checked_out=$(git -C "$repo" worktree list --porcelain 2>/dev/null | awk '/^branch /{sub("refs/heads/",""); print $2}')
 
+  # Worktree cleanup promises to keep its branch for restoration. A later
+  # branch-cleanup pass (including one in this same run) must respect that.
+  local retained log_file
+  retained=$(
+    for log_file in "${DEVPURGE_LOG_DIR}"/removed-worktrees-*.tsv; do
+      [[ -f "$log_file" ]] || continue
+      awk -F '\t' -v repo="$repo" '$2 == repo {print $4}' "$log_file"
+    done
+  )
+
   local branch
   while IFS= read -r branch; do
     [[ -z "$branch" ]] && continue
@@ -27,7 +37,7 @@ _dp_merged_branches() {
     local co
     while IFS= read -r co; do
       [[ "$branch" == "$co" ]] && { is_out=1; break; }
-    done <<< "$checked_out"
+    done <<< "${checked_out}"$'\n'"${retained}"
     [[ "$is_out" -eq 1 ]] && continue
     printf '%s\n' "$branch"
   done < <(git -C "$repo" for-each-ref refs/heads --format='%(refname:short)' --merged "$default_branch" 2>/dev/null)

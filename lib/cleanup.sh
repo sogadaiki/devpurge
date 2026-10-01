@@ -58,13 +58,53 @@ devpurge_rm_guard() {
   return 0
 }
 
+# Record what a worktree pointed at BEFORE it disappears, so it can be
+# recreated with `git -C <repo> worktree add <path> <branch>` (or <sha> when
+# detached). Log lives outside ~/Library/Logs, which devpurge itself purges.
+# Args: $1=worktree path $2=main repo path
+_dp_log_worktree_removal() {
+  local wt="$1" repo="$2" branch sha
+  branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null) || return 1
+  sha=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || return 1
+  mkdir -p "$DEVPURGE_LOG_DIR" || return 1
+  DEVPURGE_REMOVAL_RECORD=$(printf '%s\t%s\t%s\t%s\t%s' "$(date +%s)" "$repo" "$wt" "$branch" "$sha")
+  printf '%s\n' "$DEVPURGE_REMOVAL_RECORD" >> "${DEVPURGE_LOG_DIR}/removed-worktrees-$(date +%Y%m%d).tsv"
+}
+
+# Only completed operations belong in weekly deletion totals. The pre-removal
+# record above remains available even if git refuses or the process stops.
+_dp_log_worktree_result() {
+  printf '%s\t%s\n' "$DEVPURGE_REMOVAL_RECORD" "$1" \
+    >> "${DEVPURGE_LOG_DIR}/worktree-removal-results-$(date +%Y%m%d).tsv"
+}
+
+# A scan is a snapshot. Recheck ignored data, branch backup and age immediately
+# before removal as git's own dirty check cannot protect newly ignored files.
+_dp_worktree_removal_ready() (
+  local wt="$1" repo="$2" default_branch lock_path
+  default_branch=$(_dp_default_branch "$repo") || exit 1
+  lock_path=$(git -C "$wt" rev-parse --git-path locked 2>/dev/null) || exit 1
+  [[ -e "$lock_path" ]] && exit 1
+  SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+  SCAN_TOTAL_BYTES=0; SCAN_REVIEW_BYTES=0
+  _dp_classify_worktree "$repo" "$default_branch" "$wt" 0 0 \
+    "$(date +%s)" "$((DEVPURGE_WORKTREE_AGE_DAYS * 86400))" >/dev/null || exit 1
+  [[ ${#DEVPURGE_WT_ROOTS[@]} -eq 1 ]]
+)
+
 # Remove a git worktree via git itself (never rm -rf).
 # Args: $1=worktree path $2=main repo path
 _dp_remove_worktree() {
   local wt="$1" repo="$2"
   [[ -d "$repo/.git" || -f "$repo/.git" ]] || return 1
+  _dp_log_worktree_removal "$wt" "$repo" || return 1
   # git refuses dirty/locked worktrees without --force; we never pass --force
-  git -C "$repo" worktree remove "$wt" 2>/dev/null
+  if git -C "$repo" worktree remove "$wt" 2>/dev/null; then
+    _dp_log_worktree_result removed
+  else
+    _dp_log_worktree_result failed
+    return 1
+  fi
 }
 
 # Delete selected cache directories
@@ -166,6 +206,11 @@ devpurge_cleanup() {
         continue
       fi
 
+      if ! _dp_worktree_removal_ready "$path" "$repo"; then
+        CLEANUP_LOG+=("${id}|SKIP|0|${desc}|Worktree no longer eligible")
+        CLEANUP_SKIPPED=$((CLEANUP_SKIPPED + 1))
+        continue
+      fi
       printf "  Removing %-6s %s..." "$size_human" "$desc"
       if [[ "${OPT_TRASH:-0}" -eq 1 ]]; then
         # Trash mode bypasses git's delete-time recheck; re-verify cleanliness
@@ -178,7 +223,9 @@ devpurge_cleanup() {
           continue
         fi
         # Move the worktree away, then prune the stale record
-        if _dp_dispose "$path" "$id" && git -C "$repo" worktree prune 2>/dev/null; then
+        if _dp_log_worktree_removal "$path" "$repo" && _dp_dispose "$path" "$id" \
+           && git -C "$repo" worktree prune 2>/dev/null; then
+          _dp_log_worktree_result trashed
           printf " ${CLR_GREEN}moved to Trash${CLR_RESET}\n"
           CLEANUP_LOG+=("${id}|OK|${size_bytes}|${desc}|Worktree moved to Trash")
           CLEANUP_FREED_BYTES=$((CLEANUP_FREED_BYTES + ${size_bytes%.*}))

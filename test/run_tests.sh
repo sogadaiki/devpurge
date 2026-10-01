@@ -68,6 +68,8 @@ source "${PROJECT_DIR}/lib/config.sh"
 source "${PROJECT_DIR}/lib/paths.sh"
 source "${PROJECT_DIR}/lib/worktree.sh"
 source "${PROJECT_DIR}/lib/branches.sh"
+# Never contaminate the real weekly removal report with fixture deletions.
+DEVPURGE_LOG_DIR="${TMPDIR:-/tmp}/devpurge-test-logs-$$"
 source "${PROJECT_DIR}/lib/dupes.sh"
 source "${PROJECT_DIR}/lib/scan.sh"
 source "${PROJECT_DIR}/lib/report.sh"
@@ -388,6 +390,7 @@ git -C "${WT_TMP2}/repo" -c user.name=t -c user.email=t@t commit -q -m blob
 git -C "${WT_TMP2}/repo" worktree add -q "${WT_TMP2}/wt-auto" -b feat-auto
 
 SCAN_RESULTS=("W01|${WT_TMP2}/wt-auto|worktree|worktree: wt-auto (merged, clean)|2M|2097152|remove:${WT_TMP2}/repo")
+DEVPURGE_WORKTREE_AGE_DAYS=0
 OPT_YES=1
 DEVPURGE_WORKTREE_AUTO=0
 devpurge_cleanup "all" >/dev/null 2>&1
@@ -416,6 +419,7 @@ fi
 OPT_YES=0
 DEVPURGE_WORKTREE_AUTO=0
 rm -rf "$WT_TMP2"
+DEVPURGE_WORKTREE_AGE_DAYS=7
 
 # ── .env guard: worktree containing .env files is review-only ───────────────
 WT_TMP3="${HOME}/.devpurge-test-wt3-$$"
@@ -697,9 +701,169 @@ _dp_scan_repo_worktrees "${IG_TMP}/repo" >/dev/null
 ig_demoted=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "has ignored files" || true)
 assert_eq "unique ignored file demotes to review" "1" "$ig_demoted"
 
+# Build output (.open-next, *.tsbuildinfo, .godot) and .DS_Store under a
+# non-ASCII folder are regenerable, not one-of-a-kind
+rm -f "${IG_TMP}/wt-ig/localdata.sqlite"
+printf ".open-next/\n*.tsbuildinfo\n.godot/\n.DS_Store\nnext-env.d.ts\n.refresh.lock\n" >> "$(git -C "${IG_TMP}/wt-ig" rev-parse --git-common-dir)/info/exclude"
+mkdir -p "${IG_TMP}/wt-ig/apps/web/.open-next/.build" "${IG_TMP}/wt-ig/godot/.godot/editor" "${IG_TMP}/wt-ig/企画案"
+echo x > "${IG_TMP}/wt-ig/apps/web/.open-next/.build/cache.cjs"
+echo x > "${IG_TMP}/wt-ig/apps/web/tsconfig.tsbuildinfo"
+echo x > "${IG_TMP}/wt-ig/godot/.godot/editor/a.cfg"
+echo x > "${IG_TMP}/wt-ig/企画案/.DS_Store"
+echo x > "${IG_TMP}/wt-ig/apps/web/next-env.d.ts"
+echo x > "${IG_TMP}/wt-ig/企画案/.refresh.lock"
+ig_unique=$(_dp_ignored_unique "${IG_TMP}/wt-ig")
+assert_eq "build output and non-ASCII .DS_Store are regenerable" "" "$ig_unique"
+echo "unique data" > "${IG_TMP}/wt-ig/localdata.sqlite"
+assert_eq "generated files do not mask unique data" "localdata.sqlite" "$(_dp_ignored_unique "${IG_TMP}/wt-ig")"
+rm -f "${IG_TMP}/wt-ig/localdata.sqlite"
+# Empty fixture only: no real credentials are read or copied.
+touch "${IG_TMP}/wt-ig/apps/web/.open-next/.build/.env.fixture"
+assert_contains "deeply nested ignored env file remains protected" '.env.fixture' "$(_dp_ignored_unique "${IG_TMP}/wt-ig")"
+assert_eq "failed ignored-file inspection stays in review" "ignored-file scan failed" "$(_dp_ignored_unique "${IG_TMP}/missing")"
+
 git -C "${IG_TMP}/repo" worktree remove --force "${IG_TMP}/wt-ig" >/dev/null 2>&1 || true
 rm -rf "$IG_TMP"
 DEVPURGE_WORKTREE_AGE_DAYS=7
+
+# ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_pushed_unmerged ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+PU_TMP="${HOME}/.devpurge-test-pu-$$"
+mkdir -p "${PU_TMP}/repo"
+git init --bare -q "${PU_TMP}/origin.git"
+git -C "${PU_TMP}/repo" init -q -b main
+git -C "${PU_TMP}/repo" remote add origin "${PU_TMP}/origin.git"
+git -C "${PU_TMP}/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+git -C "${PU_TMP}/repo" worktree add -q "${PU_TMP}/wt-pu" -b feat-pu
+dd if=/dev/zero of="${PU_TMP}/wt-pu/blob" bs=1024 count=2048 2>/dev/null
+git -C "${PU_TMP}/wt-pu" add blob
+git -C "${PU_TMP}/wt-pu" -c user.name=t -c user.email=t@t commit -q -m "unmerged work"
+DEVPURGE_WORKTREE_AGE_DAYS=0
+
+# Unmerged + not pushed -> review
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+pu_review=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|review|.*unmerged branch (not pushed)" || true)
+assert_eq "unpushed unmerged worktree is review-only" "1" "$pu_review"
+
+# Unmerged + pushed + clean -> deletable (branch survives)
+git -C "${PU_TMP}/wt-pu" push -q origin feat-pu
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+pu_ok=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|worktree|.*unmerged, pushed, clean" || true)
+assert_eq "pushed unmerged clean worktree is deletable" "1" "$pu_ok"
+
+# Local commit on top of the pushed one -> back to review
+git -C "${PU_TMP}/wt-pu" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "local only"
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+pu_ahead=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|review|.*not pushed" || true)
+assert_eq "unpushed local commit demotes to review" "1" "$pu_ahead"
+git -C "${PU_TMP}/wt-pu" push -q origin feat-pu
+
+# Removal logs a restore record and keeps the branch
+PU_LOG="${PU_TMP}/logs"
+DEVPURGE_LOG_DIR="$PU_LOG"
+pu_sha=$(git -C "${PU_TMP}/wt-pu" rev-parse HEAD)
+git -C "${PU_TMP}/repo" worktree lock "${PU_TMP}/wt-pu"
+assert_exit_code "locked removal is refused" 1 _dp_remove_worktree "${PU_TMP}/wt-pu" "${PU_TMP}/repo"
+assert_contains "refused removal is logged as failed" "${pu_sha}.*failed" "$(cat "$PU_LOG"/worktree-removal-results-*.tsv)"
+assert_exit_code "locked worktree is not eligible at deletion time" 1 _dp_worktree_removal_ready "${PU_TMP}/wt-pu" "${PU_TMP}/repo"
+git -C "${PU_TMP}/repo" worktree unlock "${PU_TMP}/wt-pu"
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+printf '*.sqlite\n' >> "${PU_TMP}/repo/.git/info/exclude"
+echo 'new unique data' > "${PU_TMP}/wt-pu/local.sqlite"
+devpurge_cleanup "all" >/dev/null 2>&1
+assert_eq "ignored data added after scan prevents removal" "1" "$CLEANUP_SKIPPED"
+rm -f "${PU_TMP}/wt-pu/local.sqlite"
+devpurge_cleanup "all" >/dev/null 2>&1
+TOTAL=$((TOTAL + 1))
+if [[ ! -d "${PU_TMP}/wt-pu" ]] && git -C "${PU_TMP}/repo" show-ref --verify --quiet refs/heads/feat-pu \
+   && grep -q "feat-pu	${pu_sha}" "$PU_LOG"/removed-worktrees-*.tsv 2>/dev/null; then
+  printf "  PASS: worktree removed, branch kept, restore record logged\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: pushed worktree removal / restore log\n"
+  FAIL=$((FAIL + 1))
+fi
+assert_contains "successful removal has separate confirmed result" "${pu_sha}.*removed" "$(cat "$PU_LOG"/worktree-removal-results-*.tsv)"
+git -C "${PU_TMP}/repo" merge -q feat-pu
+devpurge_delete_merged_branches "${PU_TMP}/repo" main
+assert_exit_code "later merged-branch cleanup keeps recorded worktree branch" 0 git -C "${PU_TMP}/repo" show-ref --verify --quiet refs/heads/feat-pu
+git -C "${PU_TMP}/repo" worktree add -q "${PU_TMP}/wt-restored" feat-pu
+assert_eq "logged worktree can be restored from retained branch" "$pu_sha" "$(git -C "${PU_TMP}/wt-restored" rev-parse HEAD)"
+DEVPURGE_LOG_DIR="${TMPDIR:-/tmp}/devpurge-test-logs-$$"
+rm -rf "$PU_TMP"
+DEVPURGE_WORKTREE_AGE_DAYS=7
+
+# ══════════════════════════════════════════════════════════════════════════════
+printf "\n=== test_duplicates_and_versions ===\n\n"
+# ══════════════════════════════════════════════════════════════════════════════
+
+DV_TMP="${HOME}/.devpurge-test-dv-$$"
+mkdir -p "${DV_TMP}/a" "${DV_TMP}/b"
+_mkrand() { head -c "$2" /dev/urandom > "$1"; }
+_mkrand "${DV_TMP}/a/kate-video.mp4" 1500000
+_mkrand "${DV_TMP}/a/kate-video-v2.mp4" 1500000
+_mkrand "${DV_TMP}/a/kate-video-v3.mp4" 1500000
+touch -t 202601010000 "${DV_TMP}/a/kate-video.mp4"
+touch -t 202602010000 "${DV_TMP}/a/kate-video-v2.mp4"
+_mkrand "${DV_TMP}/a/clip_1.mp4" 1500000
+_mkrand "${DV_TMP}/a/clip_2.mp4" 1500000
+_mkrand "${DV_TMP}/a/資料.pdf" 1500000
+cp "${DV_TMP}/a/資料.pdf" "${DV_TMP}/a/資料のコピー.pdf"
+touch -t 202601010000 "${DV_TMP}/a/資料.pdf"
+_mkrand "${DV_TMP}/a/semifinal.mov" 1500000
+_mkrand "${DV_TMP}/a/semi.mov" 1500000
+_mkrand "${DV_TMP}/a/big.bin" 3000000
+cp "${DV_TMP}/a/big.bin" "${DV_TMP}/b/big-renamed.bin"
+touch -t 202601010000 "${DV_TMP}/a/big.bin"
+_mkrand "${DV_TMP}/b/same-size.bin" 3000000
+
+SCAN_RESULTS=(); RV_COUNT=0; SCAN_REVIEW_BYTES=0
+DEVPURGE_DUPE_MIN_MB=1
+_dp_scan_duplicates "$DV_TMP"
+dv_out=$(printf '%s\n' "${SCAN_RESULTS[@]+"${SCAN_RESULTS[@]}"}")
+assert_contains "renamed identical copy is detected" "b/big-renamed.bin|review|identical copy of: ${DV_TMP}/a/big.bin" "$dv_out"
+assert_eq "same-size different content is not a duplicate" "0" "$(printf '%s\n' "$dv_out" | grep -c 'same-size.bin' || true)"
+
+SCAN_RESULTS=(); RV_COUNT=0
+_dp_scan_versions "$DV_TMP"
+dv_ver=$(printf '%s\n' "${SCAN_RESULTS[@]+"${SCAN_RESULTS[@]}"}")
+assert_eq "older v-suffixed versions reported (2 of 3)" "2" "$(printf '%s\n' "$dv_ver" | grep -c 'older version (newest: kate-video-v3.mp4)' || true)"
+assert_contains "Japanese copy marker groups with original" "a/資料.pdf|review|older version (newest: 資料のコピー.pdf)" "$dv_ver"
+assert_eq "bare _N parts are not versions" "0" "$(printf '%s\n' "$dv_ver" | grep -c 'clip_' || true)"
+assert_eq "marker must follow a separator (semifinal)" "0" "$(printf '%s\n' "$dv_ver" | grep -c 'semi' || true)"
+
+# Repeated worktree copies count once, while other repositories and changed
+# bytes at the same relative path remain distinct review candidates.
+git -C "${DV_TMP}/a" init -q -b main
+git -C "${DV_TMP}/a" add .
+git -C "${DV_TMP}/a" -c user.name=t -c user.email=t@t commit -q -m fixtures
+git -C "${DV_TMP}/a" worktree add -q "${DV_TMP}/wt-copy" -b copy
+git -C "${DV_TMP}/a" worktree add -q "${DV_TMP}/wt-changed" -b changed
+mkdir -p "${DV_TMP}/other"
+git -C "${DV_TMP}/other" init -q -b main
+cp "${DV_TMP}/a/kate-video.mp4" "${DV_TMP}/other/kate-video.mp4"
+cp "${DV_TMP}/a/kate-video-v3.mp4" "${DV_TMP}/other/kate-video-v3.mp4"
+_mkrand "${DV_TMP}/wt-changed/kate-video.mp4" 1500000
+for dv_dir in a wt-copy wt-changed other; do
+  touch -t 202601010000 "${DV_TMP}/${dv_dir}/kate-video.mp4"
+  touch -t 202602010000 "${DV_TMP}/${dv_dir}/kate-video-v3.mp4"
+done
+touch -t 202601020000 "${DV_TMP}/a/kate-video-v2.mp4" "${DV_TMP}/wt-copy/kate-video-v2.mp4" "${DV_TMP}/wt-changed/kate-video-v2.mp4"
+assert_exit_code "same relative path in unrelated repos stays distinct" 1 _dp_same_repo_file "${DV_TMP}/a/kate-video.mp4" "${DV_TMP}/other/kate-video.mp4"
+assert_exit_code "linked worktree shares repository identity" 0 _dp_same_repo_file "${DV_TMP}/a/kate-video.mp4" "${DV_TMP}/wt-copy/kate-video.mp4"
+SCAN_RESULTS=(); RV_COUNT=0; SCAN_REVIEW_BYTES=0
+_dp_scan_versions "$DV_TMP"
+dv_ver=$(printf '%s\n' "${SCAN_RESULTS[@]+"${SCAN_RESULTS[@]}"}")
+assert_eq "identical worktree versions collapse but distinct bytes and repos survive" "3" "$(printf '%s\n' "$dv_ver" | grep -c '/kate-video.mp4|review|' || true)"
+assert_eq "repeated v2 is reported only once" "1" "$(printf '%s\n' "$dv_ver" | grep -c '/kate-video-v2.mp4|review|' || true)"
+DEVPURGE_DUPE_MIN_MB=10
+rm -rf "$DV_TMP"
 
 # ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== test_json ===\n\n"
@@ -731,7 +895,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.5.2" "$version_output"
+assert_contains "version output" "devpurge 0.6.0" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)

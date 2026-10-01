@@ -133,26 +133,34 @@ Nothing judged by heuristics or AI goes straight to deletion. Quarantined items 
 
 ### Branch (v0.5.0)
 
-Local branches fully merged into the default branch, deleted with `git branch -d` only (git refuses anything unmerged). Every deleted branch's SHA is logged to `~/Library/Application Support/devpurge/logs/` first — restore any branch with `git branch <name> <sha>`.
+Local branches fully merged into the default branch, deleted with `git branch -d` only (git refuses anything unmerged). Branches named in worktree restoration logs are retained. Every deleted branch's SHA is logged to `~/Library/Application Support/devpurge/logs/` first — restore any branch with `git branch <name> <sha>`.
 
-### Worktree (v0.4.0, squash-aware since v0.5.0)
+### Worktree (v0.4.0, squash-aware since v0.5.0, push-aware since v0.6.0)
 
 Agentic coding (Codex, Claude Code, etc.) leaves behind git worktrees — full checkouts with their own node_modules. devpurge finds every worktree of every repo in your project directories and classifies it:
 
-- **merged + clean + idle 7d+** → removable, via `git worktree remove` (never `rm -rf`)
+- **merged + named branch + clean + idle 7d+** → removable, via `git worktree remove` (never `rm -rf`)
 - **squash-merged + clean + idle** → also removable — `git cherry` patch-equivalence catches branches that agentic tools (Codex etc.) squash-merged, which look "unmerged" to naive ancestor checks
+- **unmerged but pushed + clean + idle** (v0.6.0) → also removable — every commit is on `origin/<branch>` and the local branch ref is kept, so `git worktree add <path> <branch>` brings it back. Abandoned agent lanes no longer pile up forever
 - **stale records** → `git worktree prune`
-- **unmerged / dirty / locked / recently active / contains `.env*`** → *reported only, never touched*
+- **unpushed / detached / dirty / locked / recently active / contains `.env*`** → *reported only, never touched*
 
-Unattended runs (`-y`, e.g. cron) skip worktree removal entirely unless you opt in with `worktree_auto=1` — git-clean checks can't see ignored files, so a human should be in the loop by default. Idle threshold configurable via `worktree_age_days=N` in `~/.devpurgerc`.
+Every removable worktree must also pass the **one-of-a-kind guard**: gitignored files are inspected and anything that is not regenerable (node_modules, `.next`/`.open-next`/`dist`/`build`, `.godot`, `*.tsbuildinfo`, `next-env.d.ts`, `.refresh.lock`, caches, `.DS_Store`…) — a client's original ZIP, a local DB, generated audio — demotes the worktree to review. Inspection failure also stays in review. Eligibility is checked again immediately before removal.
+
+Each removal attempt is logged (epoch, repo, path, branch, SHA) to `~/Library/Application Support/devpurge/logs/removed-worktrees-*.tsv` before it happens. `worktree-removal-results-*.tsv` adds the result (`removed`, `trashed`, or `failed`); weekly totals count confirmed successes only. Restore with `git -C <repo> worktree add <path> <branch>`, or `git -C <repo> worktree add -b <branch> <path> <sha>` if that branch was manually removed later. Automatic branch cleanup preserves refs named in the worktree restoration logs.
+
+Unattended runs (`-y`, e.g. cron) skip worktree removal entirely unless you opt in with `worktree_auto=1`. Idle threshold configurable via `worktree_age_days=N` in `~/.devpurgerc`.
+
+Idle age means the HEAD commit timestamp, not the last time an editor opened the checkout. Lock ongoing work with `git worktree lock <path>` or exclude its path. Push status uses locally cached `origin/<branch>` refs; the scan does not fetch.
 
 ### Review (v0.4.0 new — reported, NEVER deleted)
 
 Large user data that a cleanup tool has no business deleting, but that you should know about: Downloads, Movies, screen recordings on the Desktop, AI session histories (`~/.codex/sessions`, `~/.claude/projects`), browser-automation profiles, Time Machine local snapshots. devpurge shows them with sizes and lets *you* decide.
 
-v0.5.0 adds two detectors here:
+Three detectors live here (v0.5.0, reworked in v0.6.0):
 
-- **Stray duplicates**: same-name same-size files ≥50MB across your user dirs — Unicode-normalization-aware, and smart enough to skip the same repo file seen through multiple git worktrees
+- **Identical copies**: byte-identical files ≥10MB (SHA-256, any name) across your user dirs — a cheap first+last-MB fingerprint means same-size files are only fully hashed when they really look alike. Skips the same repo file seen through multiple git worktrees
+- **Older versions**: explicit version siblings in one folder — `foo.mp4` / `foo-v2.mp4` / `foo_final.mp4` / `foo (1).zip` / `foo 2.png` / `資料のコピー.pdf` — everything but the newest by modification time is listed. Identical copies at the same relative path in linked worktrees count once; different contents or separate repositories remain separate. Bare `_1`/`_2` suffixes are deliberately ignored (camera splits and numbered series are not versions)
 - **Stale files**: files ≥100MB not *opened* in 90+ days (`stale_days=N`), via Spotlight's `kMDItemLastUsedDate` — a real "did I ever look at this again" signal, not just mtime
 
 ### AI-Era

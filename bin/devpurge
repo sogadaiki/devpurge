@@ -105,11 +105,12 @@ CACHE TIERS
   DevTool   npm, Homebrew, Chrome, VS Code, pip, Cargo, Gradle, Xcode
             + auto-detected app caches (Electron/Container/misc)
   Project   node_modules / .next in development projects (再インストールで復元)
-  Worktree  merged/squash-merged & idle git worktrees (removed via git)
+  Worktree  merged or pushed, clean & idle git worktrees (removed via git,
+            branch kept, restore record logged)
   Branch    local branches merged into main (git branch -d, SHAs logged)
   Caution   Notion, Discord, Slack, Adobe, Steam, AI models (--all to include)
   Review    large user data - reported only, NEVER deleted (Downloads,
-            sessions, duplicates, files unopened 90d+)
+            sessions, identical copies, older versions, files unopened 90d+)
   System    sleepimage, diagnostics, OS updates (sudo only)
 
 SAFETY

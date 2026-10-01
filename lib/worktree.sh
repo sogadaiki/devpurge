@@ -2,16 +2,18 @@
 # devpurge - Stale git worktree detection
 #
 # Finds git worktrees under common project directories and classifies them:
-#   - merged + clean + idle  -> deletable via `git worktree remove` (never rm -rf)
+#   - (merged | squash-merged | unmerged-but-pushed) + clean + idle + no
+#     one-of-a-kind ignored files -> deletable via `git worktree remove`
+#     (never rm -rf). The branch ref survives, so `git worktree add` restores.
 #   - prunable records       -> `git worktree prune` on the main repo
-#   - unmerged/dirty/locked  -> review tier (reported, never deleted)
+#   - unpushed/dirty/locked/.env -> review tier (reported, never deleted)
 #
 # Result entries use the extended 7-field format:
 #   ID|PATH|TIER|DESC|SIZE_HUMAN|SIZE_BYTES|META
 # where META is "remove:<main_repo>" or "prune:<main_repo>".
 
 # Minimum idle age (days since last commit on the worktree HEAD) before a
-# merged+clean worktree is considered safe to remove. Overridable via
+# backed-up clean worktree is considered safe to remove. Overridable via
 # ~/.devpurgerc (worktree_age_days=N).
 DEVPURGE_WORKTREE_AGE_DAYS="${DEVPURGE_WORKTREE_AGE_DAYS:-7}"
 
@@ -39,10 +41,41 @@ _dp_default_branch() {
   fi
 }
 
+# Print the first ignored path in a worktree that is NOT regenerable (empty
+# output = everything ignored is safe to lose). git-clean is blind to ignored
+# files, so this is the only guard for one-of-a-kind data (client originals,
+# local DBs, generated audio). Files are listed one by one (--directory would
+# collapse a folder holding only ignored files into an opaque "dir/" entry);
+# -z avoids core.quotepath mangling non-ASCII paths, which used to hide
+# .DS_Store under Japanese folder names.
+_dp_ignored_unique() {
+  local wt="$1" listing path found=""
+  local generated_dirs='(^|/)(node_modules|\.next|\.open-next|\.svelte-kit|\.nuxt|\.vite|\.parcel-cache|\.expo|dist|build|out|\.wrangler|\.turbo|\.cache|coverage|__pycache__|\.venv|venv|\.pytest_cache|\.godot)(/|$)'
+  local generated_files='(^|/)(\.DS_Store|\.eslintcache|next-env\.d\.ts|\.refresh\.lock)$|\.log$|\.tsbuildinfo$'
+  listing=$(mktemp "${TMPDIR:-/tmp}/devpurge-ignored.XXXXXX") || { printf 'ignored-file scan failed'; return 0; }
+  if ! git -C "$wt" ls-files -z --others -i --exclude-standard > "$listing" 2>/dev/null; then
+    rm -f "$listing"
+    printf 'ignored-file scan failed'
+    return 0
+  fi
+  while IFS= read -r -d '' path; do
+    # Secrets stay protected even when nested inside otherwise generated dirs.
+    case "${path##*/}" in .env*) found="$path"; break ;; esac
+    [[ "$path" =~ $generated_dirs ]] && continue
+    [[ "$path" =~ (^|/)supabase/\.temp(/|$) ]] && continue
+    [[ "$path" =~ $generated_files ]] && continue
+    found="$path"
+    break
+  done < "$listing"
+  rm -f "$listing"
+  printf '%s' "$found"
+}
+
 # Scan one main repo's worktrees. Appends to SCAN_RESULTS.
 # Args: $1 = main repo path
 _dp_scan_repo_worktrees() {
   local repo="$1"
+  devpurge_is_excluded "$repo" && return 0
   local default_branch
   default_branch=$(_dp_default_branch "$repo") || return 0
 
@@ -117,6 +150,8 @@ _dp_classify_worktree() {
 
   if [[ "$locked" -eq 1 ]]; then
     state="locked"
+  elif ! git -C "$wt" symbolic-ref --quiet HEAD >/dev/null 2>&1; then
+    state="detached HEAD (review)"
   elif ! git -C "$wt" status --porcelain >/dev/null 2>&1; then
     # fail closed: an unreadable worktree is never "clean"
     state="unreadable (git status failed)"
@@ -135,40 +170,49 @@ _dp_classify_worktree() {
       if git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_branch" 2>/dev/null; then
         merge_kind="merged"
       else
+        # Not in the default branch. Removing the worktree never deletes its
+        # branch ref, but only a branch backed up on origin (HEAD contained
+        # in origin/<branch>) guarantees nothing is lost - detached HEADs and
+        # local-only branches stay in review.
+        local wt_branch remote_head pushed=0
+        wt_branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)
+        remote_head=""
+        if [[ -n "$wt_branch" && "$wt_branch" != "HEAD" ]]; then
+          remote_head=$(git -C "$repo" rev-parse --verify --quiet "refs/remotes/origin/${wt_branch}" 2>/dev/null || true)
+        fi
+        if [[ -n "$remote_head" ]] && \
+           git -C "$repo" merge-base --is-ancestor "$wt_head" "$remote_head" 2>/dev/null; then
+          pushed=1
+        fi
+
         # Squash-merge detection: `git cherry` marks commits whose patch
         # already exists upstream with "-". All "-" = effectively merged.
-        # patch-id can collide (identical change made twice), so a
-        # squash-merged worktree is only deletable when its branch is ALSO
-        # backed up on origin - then removal can lose nothing either way.
-        local cherry
+        # patch-id can collide (identical change made twice), so it is only
+        # trusted together with the origin backup above.
+        local cherry squashed=0
         cherry=$(git -C "$repo" cherry "$default_branch" "$wt_head" 2>/dev/null || true)
         if [[ -n "$cherry" ]] && ! printf '%s\n' "$cherry" | grep -q '^+'; then
-          local wt_branch remote_head
-          wt_branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)
-          remote_head=""
-          if [[ -n "$wt_branch" && "$wt_branch" != "HEAD" ]]; then
-            remote_head=$(git -C "$repo" rev-parse --verify --quiet "refs/remotes/origin/${wt_branch}" 2>/dev/null || true)
-          fi
-          if [[ -n "$remote_head" && "$remote_head" == "$wt_head" ]]; then
-            merge_kind="squash-merged"
-          else
-            state="squash-merged (branch not pushed - review)"
-          fi
+          squashed=1
+        fi
+
+        if [[ "$pushed" -eq 1 && "$squashed" -eq 1 ]]; then
+          merge_kind="squash-merged"
+        elif [[ "$pushed" -eq 1 ]]; then
+          merge_kind="unmerged, pushed"
+        elif [[ "$squashed" -eq 1 ]]; then
+          state="squash-merged (branch not pushed - review)"
+        else
+          state="unmerged branch (not pushed)"
         fi
       fi
 
       if [[ -n "$merge_kind" ]]; then
-        # Merged + clean. Check idle age before calling it safe.
+        # Backed up + clean. Check idle age before calling it safe.
         local head_epoch
         head_epoch=$(git -C "$wt" log -1 --format=%ct 2>/dev/null)
         if [[ -n "$head_epoch" && $((now_epoch - head_epoch)) -ge "$max_age_sec" ]]; then
-          # git-clean is blind to ignored files. Regenerable classes
-          # (node_modules, build output, caches) are fine to lose with the
-          # worktree; anything else ignored might be one-of-a-kind data.
           local ignored_unique
-          ignored_unique=$(git -C "$wt" ls-files --others -i --exclude-standard 2>/dev/null | \
-            grep -vE '(^|/)(node_modules|\.next|dist|build|out|\.wrangler|\.turbo|\.cache|coverage|__pycache__|\.venv|venv|\.pytest_cache)(/|$)' | \
-            grep -vE '(^|/)\.DS_Store$|\.log$' | head -1 || true)
+          ignored_unique=$(_dp_ignored_unique "$wt")
           if [[ -n "$ignored_unique" ]]; then
             state="${merge_kind} but has ignored files (e.g. $(basename "$ignored_unique"))"
           else
@@ -179,8 +223,6 @@ _dp_classify_worktree() {
         else
           state="${merge_kind} but recently active"
         fi
-      elif [[ -z "$state" ]]; then
-        state="unmerged branch"
       fi
     fi
   fi

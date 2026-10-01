@@ -395,6 +395,7 @@ devpurge_scan() {
   # Duplicate candidates and stale unused files (report-only)
   if [[ "$mode" != "ai" && "${DEVPURGE_SKIP_DUPES:-}" != "1" ]]; then
     _dp_scan_duplicates
+    _dp_scan_versions
     _dp_scan_stale_unused
     printf "\r%-80s\r" " "
   fi
