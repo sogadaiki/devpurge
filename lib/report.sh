@@ -59,6 +59,7 @@ devpurge_report() {
   local project_bytes=0
   local system_bytes=0
   local worktree_bytes=0
+  local archive_bytes=0
   local review_entries=()
 
   local entry
@@ -81,6 +82,7 @@ devpurge_report() {
       project)  project_bytes=$((project_bytes + ${size_bytes%.*})) ;;
       system)   system_bytes=$((system_bytes + ${size_bytes%.*})) ;;
       worktree) worktree_bytes=$((worktree_bytes + ${size_bytes%.*})) ;;
+      archive)  archive_bytes=$((archive_bytes + ${size_bytes%.*})) ;;
     esac
 
     local tier_display
@@ -111,6 +113,9 @@ devpurge_report() {
   fi
   if [[ $system_bytes -gt 0 ]]; then
     printf "  $(tier_label system)  : ${CLR_BOLD}%s${CLR_RESET}\n" "$(bytes_to_human $system_bytes)"
+  fi
+  if [[ $archive_bytes -gt 0 ]]; then
+    printf "  $(tier_label archive) : ${CLR_BOLD}%s${CLR_RESET}\n" "$(bytes_to_human $archive_bytes)"
   fi
 
   printf "\n"

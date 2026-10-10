@@ -11,7 +11,7 @@
 
 Your Mac's "System Data" keeps growing. GUI cleaners are catching up on AI-era tools, but none of them understand a *developer's* disk: stale git worktrees from agentic coding sessions, monorepo node_modules, Codex/Claude runtime caches — and none of them can run from cron.
 
-**devpurge** knows exactly where AI-era dev tools store their bloat, and safely removes it. It cleans dev caches only — it never touches your personal files.
+**devpurge** finds development caches and stale worktrees. Personal files remain report-only by default. The optional archive-retention policy below permanently expires files only inside an explicitly configured archive.
 
 ```
 $ devpurge -n
@@ -116,6 +116,30 @@ devpurge --exclude ~/Projects/my-app/node_modules
 | `-h, --help` | Show help |
 
 ## Cache Tiers
+
+### Archive retention (v0.7.0, explicit opt-in)
+
+```ini
+# ~/.devpurgerc — enable only for a designated temporary archive
+archive_root=~/Desktop/アーカイブ
+archive_days=10
+archive_auto=1
+```
+
+```bash
+devpurge archive --dry-run       # read-only count/reasons; no state writes
+devpurge archive --track         # register arrivals after moving files here
+devpurge archive --touch ~/Desktop/アーカイブ/case  # extend before reuse
+devpurge archive --expire        # expire eligible files only
+```
+
+Ordinary `devpurge` / `devpurge -y` runs register new arrivals and include eligible archive files as `Archive` rows. Expiry requires **both ten complete days of observed residence and ten days since observed use/change**. Unknown historical arrival starts at first registration; old modification dates and date-like folder names do not backdate it. Deletion happens on the next cleanup after the threshold, not at an exact daily timer. Existing schedules are unchanged.
+
+File access/modification/change timestamps, Spotlight last-use metadata and current open files inform retention. Before resuming archived material, agents should use `--touch`; not every application records every read. File protection patterns, exclusions, secrets, Git directories, `.devpurge-keep` subtrees, links and open files remain protected. Generic cache/duplicate scans skip the configured archive, so their reads or deletions cannot bypass its timer. A folder can contain both expired files and retained files; its root is never removed.
+
+The archive uses Python 3 and macOS metadata tools. It is separate from the 30-day quarantine: opted-in expiry is permanent, while normal `--trash` moves eligible files to Trash. `-n`, `--json`, `--discover` do not write its state; `--ai-only` and `sudo` skip archive processing. State and per-file attempt/success logs live under `~/Library/Application Support/devpurge/archive/`.
+
+See [the retention contract](docs/archive-retention.md) and the shared [archive-cleanup skill](skills/archive-cleanup/SKILL.md).
 
 ### Protected patterns (v0.5.0 — the "never touch" guarantee)
 

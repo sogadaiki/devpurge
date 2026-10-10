@@ -20,6 +20,7 @@ macOS向けキャッシュ削除CLIツール。
 - `lib/worktree.sh` — stale git worktree検出（merged/squash-merged/未マージだがorigin退避済み + clean + idle + 一点物なし→削除可、それ以外→review報告のみ。squashはgit cherryのpatch同値で判定。削除前に復元用TSVをApp Support/devpurge/logs/へ）
 - `lib/branches.sh` — マージ済みブランチ削除（git branch -dのみ、SHA復元ログをApp Support/devpurge/logs/へ）
 - `lib/quarantine.sh` — 隔離（mv+manifest、30日猶予、restore可）+ 保護パターン（証拠/裁判/訴訟等は絶対不可侵。rc protect=で追加）
+- `lib/archive.sh` / `lib/archive.py` — 明示指定したアーカイブのファイル単位の期限管理。初回登録から10日以上、最終観測利用から10日以上で削除。通常キャッシュ/重複走査はこの領域を除外する
 - `lib/dupes.sh` — 内容同一ファイル検出（SHA-256、名前不問、先頭末尾1MBの予備指紋で全ハッシュを最小化）+ 明示的バージョン違い検出（-v2/_final/(1)/ 2/のコピー。素の_1/_2は分割・連番なので対象外）+ Spotlight未使用日レポート
 - `lib/cleanup.sh` — 削除（ホワイトリスト + rm guard + review拒否 + worktreeはgit経由 + --trash対応）
 - `lib/report.sh` — レポート表示 + `--json` 出力
@@ -33,6 +34,8 @@ macOS向けキャッシュ削除CLIツール。
 
 - **スキャン結果は7フィールド**: `ID|PATH|TIER|DESC|SIZE_HUMAN|SIZE_BYTES|META`（METAはworktreeの `remove:<repo>` / `prune:<repo>`）
 - **review tierは構造的に削除不可**（cleanup冒頭でtier判定して拒否。Downloads・セッション履歴・未push/dirty/一点物ありworktree等）
+- **archive tierは明示opt-in限定**: `archive_root=` と `archive_auto=1` の指定が必要。このMacでは `~/Desktop/アーカイブ`、10日未使用をユーザーが承認済み。対象リストごとの再承認や30日quarantine追加は不要。証拠等の保護パターン、除外、`.env*`、`.git`、`.devpurge-keep`、リンク、使用中データは保持。移動日の推測やmtimeだけの削除は禁止。日数は初回観測と利用/変更の台帳で管理し、既存ファイルは登録日から数える
+- **アーカイブの読み取り専用モードは台帳も変更しない**: `archive --dry-run` / `--json` / 全体`-n`。登録は `archive --track`、再利用前の期限延長は `archive --touch <path>`。通常実行は新着登録と期限切れ整理を行う。`--ai-only` / `sudo` ではアーカイブ整理しない。共有スキルは `skills/archive-cleanup/SKILL.md`、仕様は `docs/archive-retention.md`
 - **worktreeはrm -rf禁止**。`git worktree remove`（--force無し）のみ。dirty/lockedはgitが拒否する
 - **無人実行(-y)ではworktree削除をスキップ**（gitignoreされた.env等はclean判定に出ないため）。rc `worktree_auto=1` か env `DEVPURGE_WORKTREE_AUTO=1` でopt-in。`.env*`を含むworktree、再生成不能なignoredファイルを持つworktree、未マージかつ未push/detachedのworktreeはreview行き。削除直前にも再判定する。7日はHEADコミット日時で判定し、origin退避判定はローカルremote-tracking refを使用
 - **再生成可能物**: `.open-next`、`.godot`、`*.tsbuildinfo`、`next-env.d.ts`、`.refresh.lock` を含む。ignored一覧取得失敗はreview。worktree間の旧版重複は同じGit common-dir・相対パス・内容の場合だけ集約

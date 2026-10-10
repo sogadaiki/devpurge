@@ -57,14 +57,38 @@ devpurge_load_rc() {
           *) DEVPURGE_STALE_DAYS="$sdays" ;;
         esac
         ;;
+      archive_root=*)
+        local archive_root="${line#archive_root=}"
+        DEVPURGE_ARCHIVE_ROOT="${archive_root/#\~/$HOME}"
+        DEVPURGE_ARCHIVE_ROOT="${DEVPURGE_ARCHIVE_ROOT%/}"
+        ;;
+      archive_days=*)
+        local archive_days="${line#archive_days=}"
+        case "$archive_days" in
+          ''|*[!0-9]*) ;;
+          *) DEVPURGE_ARCHIVE_DAYS="$archive_days" ;;
+        esac
+        ;;
+      archive_auto=*)
+        DEVPURGE_ARCHIVE_AUTO=0
+        [[ "${line#archive_auto=}" != "1" ]] || DEVPURGE_ARCHIVE_AUTO=1
+        ;;
     esac
   done < "$rc_file"
 }
 
 # Check if a path should be excluded (exact match or anything under it)
 # Returns 0 if excluded (should skip), 1 if not excluded
+devpurge_is_archive_path() {
+  [[ -n "${DEVPURGE_ARCHIVE_ROOT:-}" ]] || return 1
+  [[ "$1" == "$DEVPURGE_ARCHIVE_ROOT" || "$1" == "$DEVPURGE_ARCHIVE_ROOT"/* ]]
+}
+
 devpurge_is_excluded() {
   local target="$1"
+  # Only the dedicated retention engine may process this tree. Generic cache
+  # cleanup must not remove archived node_modules before the retention period.
+  devpurge_is_archive_path "$target" && return 0
   [[ ${#DEVPURGE_EXCLUDES[@]} -eq 0 ]] && return 1
   local excluded
   for excluded in "${DEVPURGE_EXCLUDES[@]}"; do

@@ -151,6 +151,33 @@ devpurge_cleanup() {
       continue
     fi
 
+    if [[ "$tier" != "archive" ]] && devpurge_is_archive_path "$path"; then
+      CLEANUP_SKIPPED=$((CLEANUP_SKIPPED + 1))
+      CLEANUP_LOG+=("${id}|SKIP|0|${desc}|Archive is governed by its own retention policy")
+      continue
+    fi
+
+    # Archive is a separately opted-in policy; never whitelist/rm its root.
+    if [[ "$tier" == "archive" ]]; then
+      local archive_output archive_deleted archive_bytes archive_kept archive_errors
+      local archive_args=(--expected "${meta#archive:}" --summary)
+      if [[ "$path" != "${DEVPURGE_ARCHIVE_ROOT:-}" || "$meta" != archive:* ]]; then
+        CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1)); continue
+      fi
+      [[ "${OPT_TRASH:-0}" -eq 0 ]] || archive_args+=(--trash)
+      if archive_output=$(devpurge_archive_expire "${archive_args[@]}"); then
+        IFS='|' read -r archive_deleted archive_bytes archive_kept archive_errors <<< "$archive_output"
+        CLEANUP_DELETED=$((CLEANUP_DELETED + archive_deleted))
+        CLEANUP_FREED_BYTES=$((CLEANUP_FREED_BYTES + archive_bytes))
+        CLEANUP_LOG+=("${id}|OK|${archive_bytes}|${desc}|${archive_deleted} files expired; journal retained")
+        dp_success "  Archive: ${archive_deleted} files processed"
+      else
+        CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+        CLEANUP_LOG+=("${id}|FAIL|0|${desc}|Archive retained or partial; inspect archive journal")
+      fi
+      continue
+    fi
+
     # ── Branch entries: delete merged branches via git, log SHAs first ───────
     if [[ "$tier" == "branch" ]]; then
       local br_default="${meta#branches:}"

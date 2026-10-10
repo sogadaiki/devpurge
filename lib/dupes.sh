@@ -35,8 +35,9 @@ DEVPURGE_VERSION_MAX="${DEVPURGE_VERSION_MAX:-20}"
 # trees, VCS data, worktree farms (handled by worktree.sh), app bundles
 _dp_user_find() {
   local dir="$1"; shift
+  devpurge_is_archive_path "$dir" && return 0
   find "$dir" -maxdepth 8 \
-    \( -name node_modules -o -name .git -o -name .worktrees -o -name '*.app' \
+    \( -path "${DEVPURGE_ARCHIVE_ROOT:-}" -o -name node_modules -o -name .git -o -name .worktrees -o -name '*.app' \
        -o -name .next -o -name .open-next -o -name .venv -o -name venv \
        -o -name Library -o -name .Trash -o -name '.env*' \) -prune -o \
     -type f "$@" -print 2>/dev/null
