@@ -434,6 +434,10 @@ devpurge_scan() {
   fi
 
   # Sort results by size (descending)
+  if [[ "$mode" != "ai" ]] && declare -F devpurge_scan_archive >/dev/null; then
+    devpurge_scan_archive
+  fi
+
   if [[ ${#SCAN_RESULTS[@]} -gt 0 ]]; then
     local sorted=()
     local line

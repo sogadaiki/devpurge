@@ -63,6 +63,7 @@ export DEVPURGE_SKIP_WORKTREES=1
 export DEVPURGE_SKIP_REVIEW=1
 export DEVPURGE_SKIP_BRANCHES=1
 export DEVPURGE_SKIP_DUPES=1
+export DEVPURGE_SKIP_ARCHIVE=1
 source "${PROJECT_DIR}/lib/utils.sh"
 source "${PROJECT_DIR}/lib/config.sh"
 source "${PROJECT_DIR}/lib/paths.sh"
@@ -75,6 +76,7 @@ source "${PROJECT_DIR}/lib/scan.sh"
 source "${PROJECT_DIR}/lib/report.sh"
 source "${PROJECT_DIR}/lib/cleanup.sh"
 source "${PROJECT_DIR}/lib/quarantine.sh"
+source "${PROJECT_DIR}/lib/archive.sh"
 source "${PROJECT_DIR}/lib/share.sh"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -908,7 +910,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.6.0" "$version_output"
+assert_contains "version output" "devpurge 0.7.0" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)
@@ -924,6 +926,24 @@ assert_contains "help shows --exclude" "exclude" "$help_exclude_output"
 
 # Unknown option
 assert_exit_code "unknown option exits 1" 1 "${PROJECT_DIR}/bin/devpurge" --bogus
+
+# The archive policy shields its contents from other cleanup tiers and hashing.
+archive_fixture=$(mktemp -d "${TMPDIR:-/tmp}/devpurge-archive-sh.XXXXXX")
+mkdir -p "$archive_fixture/held/node_modules" "$archive_fixture/other"
+printf 'keep\n' > "$archive_fixture/held/node_modules/file"
+printf 'outside\n' > "$archive_fixture/other/file"
+DEVPURGE_ARCHIVE_ROOT="$archive_fixture/held"
+assert_exit_code "configured archive is excluded from cache scans" 0 devpurge_is_excluded "$archive_fixture/held/node_modules"
+assert_contains "duplicate walk still includes unrelated files" "$archive_fixture/other/file" "$(_dp_user_find "$archive_fixture")"
+assert_eq "duplicate walk never reads the configured archive" "0" "$(_dp_user_find "$archive_fixture" | grep -c '/held/' || true)"
+assert_eq "explicit duplicate walk inside archive is empty" "" "$(_dp_user_find "$archive_fixture/held")"
+SCAN_RESULTS=("X99|$archive_fixture/held/node_modules|project|fixture|4K|4096|")
+devpurge_cleanup all >/dev/null
+assert_exit_code "cache tier cannot bypass archive age" 0 test -f "$archive_fixture/held/node_modules/file"
+DEVPURGE_ARCHIVE_AUTO=0
+assert_exit_code "archive expiry requires opt-in" 1 devpurge_archive_expire
+unset DEVPURGE_ARCHIVE_ROOT
+rm -rf "$archive_fixture"
 
 # ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== Results ===\n\n"

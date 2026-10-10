@@ -26,7 +26,7 @@ else
   CLR_DIM="\033[2m"
 fi
 
-DEVPURGE_VERSION="0.6.0"
+DEVPURGE_VERSION="0.7.0"
 
 # ── Print helpers ─────────────────────────────────────────────────────────────
 dp_info() {
@@ -141,6 +141,7 @@ tier_label() {
     system)   printf "${CLR_RED}System${CLR_RESET}" ;;
     worktree) printf "${CLR_CYAN}Worktree${CLR_RESET}" ;;
     branch)   printf "${CLR_CYAN}Branch${CLR_RESET}" ;;
+    archive)  printf "${CLR_YELLOW}Archive${CLR_RESET}" ;;
     review)   printf "${CLR_DIM}Review${CLR_RESET}" ;;
     *)        printf "%s" "$1" ;;
   esac
@@ -155,6 +156,7 @@ tier_label_plain() {
     system)   printf "System" ;;
     worktree) printf "Worktree" ;;
     branch)   printf "Branch" ;;
+    archive)  printf "Archive" ;;
     review)   printf "Review" ;;
     *)        printf "%s" "$1" ;;
   esac

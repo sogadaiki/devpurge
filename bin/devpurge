@@ -49,6 +49,8 @@ source "${DEVPURGE_DIR}/lib/report.sh"
 source "${DEVPURGE_DIR}/lib/discover.sh"
 # shellcheck source=../lib/quarantine.sh
 source "${DEVPURGE_DIR}/lib/quarantine.sh"
+# shellcheck source=../lib/archive.sh
+source "${DEVPURGE_DIR}/lib/archive.sh"
 # shellcheck source=../lib/cleanup.sh
 source "${DEVPURGE_DIR}/lib/cleanup.sh"
 # shellcheck source=../lib/share.sh
@@ -75,6 +77,10 @@ USAGE
   devpurge quarantine --list            Show quarantined items
   devpurge quarantine --restore <ID>    Restore an item to its original path
   devpurge quarantine --expire          Delete items past the grace period
+  devpurge archive --dry-run            Inspect the configured archive (read-only)
+  devpurge archive --track              Register new files; never backdate arrival
+  devpurge archive --touch <path>       Restart retention before reusing an archive
+  devpurge archive --expire             Delete eligible files (requires archive_auto=1)
 
 OPTIONS
   -n, --dry-run       Scan only, don't delete anything
@@ -111,6 +117,7 @@ CACHE TIERS
   Caution   Notion, Discord, Slack, Adobe, Steam, AI models (--all to include)
   Review    large user data - reported only, NEVER deleted (Downloads,
             sessions, identical copies, older versions, files unopened 90d+)
+  Archive   explicitly configured archive files untouched for archive_days
   System    sleepimage, diagnostics, OS updates (sudo only)
 
 SAFETY
@@ -125,11 +132,28 @@ CONFIG (~/.devpurgerc)
   protect=SUBSTRING         # never touch paths containing SUBSTRING
   quarantine_days=30        # grace period before quarantined items expire
   stale_days=90             # "not opened in N days" report threshold
+  archive_root=~/Desktop/アーカイブ  # exact archive root (unset by default)
+  archive_days=10           # minimum observed residence AND inactivity
+  archive_auto=1            # authorize permanent archive expiry, including -y
 
 MORE INFO
   https://github.com/sogadaiki/devpurge
 HELP
 }
+
+# ── Subcommand: explicitly configured archive ────────────────────────────────
+if [[ "${1:-}" == "archive" ]]; then
+  shift
+  devpurge_load_rc
+  case "${1:-}" in
+    ""|--dry-run|--json) [[ $# -le 1 ]] || exit 1; _dp_archive_run scan ;;
+    --track) [[ $# -eq 1 ]] || exit 1; _dp_archive_run observe ;;
+    --touch) [[ $# -eq 2 ]] || { dp_error "Usage: devpurge archive --touch <path>"; exit 1; }; _dp_archive_run touch --target "$2" ;;
+    --expire) [[ $# -eq 1 ]] || exit 1; devpurge_archive_expire ;;
+    *) dp_error "Unknown archive option: $1"; exit 1 ;;
+  esac
+  exit $?
+fi
 
 # ── Subcommand: devpurge quarantine ──────────────────────────────────────────
 if [[ "${1:-}" == "quarantine" ]]; then
@@ -246,6 +270,15 @@ if [[ $OPT_AI_ONLY -eq 1 ]]; then
   scan_mode="ai"
 elif [[ $OPT_ALL -eq 1 ]]; then
   scan_mode="all"
+fi
+
+# Read-only modes never create/update archive state. Ordinary scheduled runs
+# register arrivals even when no old files/caches are eligible yet.
+if [[ $OPT_DRY_RUN -eq 0 && $OPT_JSON -eq 0 && "$scan_mode" != "ai" ]]; then
+  if ! devpurge_archive_observe; then
+    export DEVPURGE_SKIP_ARCHIVE=1
+    dp_warn "Archive retained: observation failed"
+  fi
 fi
 
 if [[ $OPT_JSON -eq 1 ]]; then
