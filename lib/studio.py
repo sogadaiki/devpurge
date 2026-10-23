@@ -55,6 +55,55 @@ def inside(path, root):
     return path == root or root in path.parents
 
 
+def deleted_open_files(output):
+    """Aggregate lsof field output without paths; deduplicate open descriptors.
+
+    File size is logical, not allocated/reclaimable APFS space. A shared inode
+    appears once globally, but under every owner that would need to close it.
+    """
+    files, owners = {}, {}
+    process, record = None, None
+    incomplete = 0
+
+    def finish():
+        nonlocal incomplete
+        if not record or record.get('t') != 'REG':
+            return
+        if not record.get('k', '').isdigit():
+            incomplete += 1
+            return
+        if record['k'] != '0':
+            return
+        if process is None or not record.get('D') or not record.get('i', '').isdigit() or not record.get('s', '').isdigit():
+            incomplete += 1
+            return
+        identity = (record['D'], record['i'])
+        files[identity] = max(files.get(identity, 0), int(record['s']))
+        owners[process]['files'].add(identity)
+
+    for line in output.splitlines():
+        if not line:
+            continue
+        field, value = line[0], line[1:]
+        if field == 'p':
+            finish()
+            record = None
+            process = int(value) if value.isdigit() else None
+            if process is not None:
+                owners.setdefault(process, {'pid': process, 'name': '不明なプロセス', 'files': set()})
+        elif field == 'c' and process is not None:
+            owners[process]['name'] = value[:120]
+        elif field == 'f':
+            finish()
+            record = {}
+        elif record is not None and field in ('t', 'k', 'D', 'i', 's'):
+            record[field] = value
+    finish()
+    processes = [{'pid': p['pid'], 'name': p['name'], 'bytes': sum(files[k] for k in p['files']), 'files': len(p['files'])} for p in owners.values() if p['files']]
+    return {'observed_bytes': sum(files.values()), 'file_count': len(files), 'incomplete': incomplete,
+            'processes': sorted(processes, key=lambda p: p['bytes'], reverse=True)[:12]}
+
+
 class Studio:
     def __init__(self, home=None, state=None):
         self.home = Path(home or Path.home()).resolve()
@@ -223,6 +272,9 @@ class Studio:
         _, uptime, _ = command(['uptime'])
         scode, snapshots, _ = command(['tmutil', 'listlocalsnapshots', '/'])
         pcode, processes, _ = command(['ps', '-axo', 'pid=,rss=,comm='])
+        rcode, ram, _ = command(['sysctl', '-n', 'hw.memsize'])
+        bcode, boot, _ = command(['sysctl', 'kern.boottime'])
+        boot_match = re.search(r'\bsec\s*=\s*(\d+)', boot)
         top = []
         for line in processes.splitlines():
             parts = line.strip().split(None, 2)
@@ -230,9 +282,33 @@ class Studio:
                 top.append({'pid': int(parts[0]), 'bytes': int(parts[1]) * 1024, 'name': Path(parts[2]).name})
         return {'total': usage.total, 'free': usage.free, 'used': usage.used,
                 'swap_used': int(float(match[1]) * 1024**2) if code == 0 and match else None,
+                'ram': int(ram.strip()) if rcode == 0 and ram.strip().isdigit() else None,
+                'boot_epoch': int(boot_match[1]) if bcode == 0 and boot_match else None,
                 'uptime': uptime.strip(), 'snapshots': snapshots.strip() if scode == 0 else None,
                 'processes': sorted(top, key=lambda p: p['bytes'], reverse=True)[:12],
                 'process_status': 'ok' if pcode == 0 else 'unknown'}
+
+    def pressure(self):
+        """Quick read-only diagnosis, independent of the full folder scan."""
+        with self.lock:
+            system = self.system()
+            # No file names, command arguments, contents, sudo, or process control.
+            code, output, error = command(['/usr/sbin/lsof', '-nP', '+L1', '-F', 'pcftsiDk'], timeout=15)
+            opened = deleted_open_files(output)
+            valid = code in (0, 1) and not error.strip() and not opened['incomplete']
+            opened['status'] = 'observed' if valid else 'partial' if output else 'unknown'
+            opened['bytes'] = opened['observed_bytes'] if valid else None
+            history = self.load('pressure-history.json', [])
+            previous = history[-1] if history else None
+            at = dt.datetime.now(dt.timezone.utc).isoformat()
+            sample = {'at': at, 'free': system['free'], 'swap_used': system['swap_used'],
+                      'boot_epoch': system['boot_epoch'], 'deleted_open_bytes': opened['bytes']}
+            result = {'at': at, 'system': system, 'deleted_open': opened, 'previous': previous,
+                      'free_delta': system['free'] - previous['free'] if previous else None,
+                      'boot_changed': bool(previous and previous.get('boot_epoch') and system['boot_epoch'] and previous['boot_epoch'] != system['boot_epoch'])}
+            atomic_json(self.state / 'pressure-history.json', (history + [sample])[-120:])
+            atomic_json(self.state / 'pressure.json', result)
+            return result
 
     def landscape(self):
         """A separate non-additive inventory explains data beyond cache candidates."""
@@ -418,7 +494,7 @@ class Studio:
             if not executable:
                 raise ValueError('uvが見つかりません。インストールは自動で行いません')
             path = self.physical(self.home / '.cache/uv')
-            tree = self.tree(path)
+            tree = self.tree(path, uv_cache=True)
             self.idle(path, tree['newest'])
             key = secrets.token_urlsafe(24)
             plan = {'id': key, 'created': time.time(), 'kind': 'uv-prune', 'executable': executable,
@@ -427,9 +503,11 @@ class Studio:
             self.plans[key] = plan
             return plan
 
-    def tree(self, path):
+    def tree(self, path, uv_cache=False):
         """Metadata fingerprint, never file contents. Fail closed on unknowns."""
         self.physical(path)
+        if uv_cache and (path != self.home / '.cache/uv' or not path.is_dir()):
+            raise ValueError('uvの既定キャッシュ以外は操作できません')
         digest = hashlib.sha256()
         newest = 0
         size = 0
@@ -441,7 +519,22 @@ class Studio:
             if self.blocked(p):
                 raise ValueError('保護ファイルを含むため保持します')
             s = p.lstat()
-            if stat.S_ISLNK(s.st_mode) or not (stat.S_ISREG(s.st_mode) or stat.S_ISDIR(s.st_mode)):
+            link = stat.S_ISLNK(s.st_mode)
+            # Only the official uv command may handle cache links. uv's build
+            # environments also link to its managed Python executable. These
+            # references are inspected without traversing/moving the target.
+            if link and uv_cache:
+                try:
+                    target = p.resolve()
+                except (OSError, RuntimeError) as e:
+                    raise ValueError('リンク先を確認できないため保持します') from e
+                managed_python = (p.parent.name == 'bin' and re.fullmatch(r'python(?:\d+(?:\.\d+)?)?', p.name)
+                                  and inside(target, self.home / '.local/share/uv/python')
+                                  and target.parent.name == 'bin' and re.fullmatch(r'python\d+\.\d+', target.name)
+                                  and target.is_file())
+                if (not inside(target, path) and not managed_python) or self.blocked(target):
+                    raise ValueError('キャッシュ外へのリンクを含むため保持します')
+            elif link or not (stat.S_ISREG(s.st_mode) or stat.S_ISDIR(s.st_mode)):
                 raise ValueError('リンクまたは特殊ファイルを含むため保持します')
             count += 1
             if count > 250000 or time.monotonic() - start > 25:
@@ -496,7 +589,7 @@ class Studio:
                     raise ValueError('完成品が変わったため整理を中止しました')
             for i in plan['entries']:
                 p = Path(i['path'])
-                if self.tree(p) != i['tree']:
+                if self.tree(p, uv_cache=plan.get('kind') == 'uv-prune') != i['tree']:
                     raise ValueError('確認後にファイルが変わりました。再スキャンしてください')
                 self.idle(p, i['tree']['newest'])
             if plan.get('kind') == 'uv-prune':
@@ -666,6 +759,7 @@ def handler(studio, token):
                 return self.send(403, {'error': 'ローカルアクセスのみ許可します'})
             path = urllib.parse.urlsplit(self.path).path
             assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css'), '/daily.js': ('daily.js', 'text/javascript'), '/daily.css': ('daily.css', 'text/css'), '/assets/companion.png': ('assets/companion.png', 'image/png')}
+            assets.update({'/refresh.js': ('refresh.js', 'text/javascript'), '/refresh.css': ('refresh.css', 'text/css')})
             if path in assets:
                 name, kind = assets[path]
                 return self.send(200, (ROOT / 'ui' / name).read_bytes(), kind)
@@ -673,7 +767,7 @@ def handler(studio, token):
                 return self.send(403, {'error': '起動時のURLから開いてください'})
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
-                return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'finals': studio.final_suggestions(), 'daily': studio.daily()})
+                return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'pressure': studio.load('pressure.json', None), 'pressure_history': studio.load('pressure-history.json', []), 'finals': studio.final_suggestions(), 'daily': studio.daily()})
             return self.send(404, {'error': '見つかりません'})
 
         def do_POST(self):
@@ -705,6 +799,10 @@ def handler(studio, token):
                     return self.send(200, studio.completion_plan(data.get('id')))
                 if self.path == '/api/refresh-plan':
                     return self.send(200, studio.refresh_plan())
+                if self.path == '/api/pressure':
+                    if studio.lock.locked():
+                        raise ValueError('スキャン・整理が完了してから、もう一度確認してください')
+                    return self.send(200, studio.pressure())
                 if self.path == '/api/reveal':
                     return self.send(200, studio.reveal(data.get('id')))
                 if self.path == '/api/browse':
