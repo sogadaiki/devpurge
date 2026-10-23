@@ -297,6 +297,12 @@ class StudioTest(unittest.TestCase):
         self.assertIsNone(module.swap_values('unavailable')['swap_reserved'])
         self.assertIsNone(module.swap_values('total = 12G used = 8G', 1)['swap_used'])
 
+    def test_python_role_uses_executable_metadata_without_opening_files(self):
+        self.assertEqual(module.process_label('/user/.local/share/audio-studio-mcp/.venv/bin/python'), 'Audio Studio（音生成） / Python')
+        self.assertEqual(module.process_label('/work/fixture/.venv/bin/python3.12'), 'fixture / Python')
+        self.assertEqual(module.process_label('/Library/Frameworks/Python.framework/Versions/3.12/bin/python3'), 'python3')
+        self.assertEqual(module.process_label('next-server (v16)'), 'next-server (v16)')
+
     def test_pressure_comparison_does_not_double_count_swap_or_attribute_other_changes(self):
         before = {'free':100, 'boot_epoch':1, 'swap_used':20, 'swap_reserved':30, 'vm_volume_bytes':32, 'deleted_open_bytes':10}
         after = {'free':95, 'boot_epoch':1, 'swap_used':10, 'swap_reserved':15, 'vm_volume_bytes':16, 'deleted_open_bytes':None}

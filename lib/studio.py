@@ -128,6 +128,20 @@ def process_footprint(pid):
         return None
 
 
+def process_label(executable):
+    """Explain known local Python environments from executable metadata only."""
+    path = Path(executable)
+    if path.name.lower().startswith('python'):
+        if 'audio-studio-mcp' in path.parts:
+            return 'Audio Studio（音生成） / Python'
+        for marker in ('.venv', 'venv'):
+            if marker in path.parts:
+                index = path.parts.index(marker)
+                if index > 1:
+                    return path.parts[index-1] + ' / Python'
+    return path.name
+
+
 def swap_values(output, code=0):
     values = {}
     for field, key in [('used', 'swap_used'), ('total', 'swap_reserved')]:
@@ -351,7 +365,7 @@ class Studio:
             if len(parts) == 4 and all(p.isdigit() for p in parts[:3]) and len(top) < 2000:
                 pid = int(parts[0])
                 top.append({'pid': pid, 'parent': int(parts[1]), 'bytes': int(parts[2]) * 1024,
-                            'footprint': process_footprint(pid), 'name': Path(parts[3]).name})
+                            'footprint': process_footprint(pid), 'name': process_label(parts[3])})
         return {'total': usage.total, 'free': usage.free, 'used': usage.used,
                 **swap_values(swap, code), 'vm_volume_bytes': vm_bytes,
                 'ram': int(ram.strip()) if rcode == 0 and ram.strip().isdigit() else None,
