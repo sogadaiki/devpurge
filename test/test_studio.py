@@ -426,6 +426,19 @@ class StudioTest(unittest.TestCase):
         self.assertEqual(result['current']['decision'],'organized')
         self.assertEqual(result['completed_days'],1)
 
+    def test_state_uses_cached_final_candidates_without_entering_desktop(self):
+        self.s.result['finals']=[{'name':'fixture.mp4','path':'/fixture/final.mp4'}]
+        server=module.Server(('127.0.0.1',0),module.handler(self.s,'test-token'))
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            with patch.object(self.s,'final_suggestions',side_effect=AssertionError('implicit Desktop discovery')):
+                url='http://127.0.0.1:'+str(server.server_port)+'/api/state'
+                request=urllib.request.Request(url,headers={'X-Studio-Token':'test-token'})
+                with urllib.request.urlopen(request,timeout=2) as response: data=json.load(response)
+            self.assertEqual(data['finals'],self.s.result['finals'])
+        finally:
+            server.shutdown();server.server_close();thread.join()
+
     def test_host_origin_and_token_guards(self):
         server=module.Server(('127.0.0.1',0),module.handler(self.s,'test-token'))
         t=threading.Thread(target=server.serve_forever,daemon=True);t.start()

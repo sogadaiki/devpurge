@@ -30,6 +30,11 @@ An authenticated local handshake rejects stale URLs and redirects; native
 navigation stays on the exact local origin. WebKit uses an ephemeral data store.
 No launchd job or automatic login item is installed. Diagnostic records and
 receipts remain in Application Support across app restarts and updates.
+Startup/status reads use saved scan results, including final-file suggestions;
+they never implicitly traverse Desktop. Final-file candidates are refreshed by
+an explicit full scan. Until then, source paths can be entered manually. This
+keeps permission/provider waits in source-folder discovery from blocking the
+initial diagnostic screen.
 `devpurge diagnose` writes the same diagnostic JSON to stdout and saves the local
 baseline/history. It never deletes user files. It does write diagnostic state;
 the existing `devpurge -n` / archive dry-run semantics are unchanged.
