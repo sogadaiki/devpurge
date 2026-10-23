@@ -391,7 +391,7 @@ class Studio:
             at = dt.datetime.now(dt.timezone.utc).isoformat()
             sample = {'at': at, 'free': system['free'], 'swap_used': system['swap_used'],
                       'swap_reserved': system.get('swap_reserved'), 'vm_volume_bytes': system.get('vm_volume_bytes'),
-                      'temp_bytes': temporary['bytes'],
+                      'temp_bytes': temporary['bytes'], 'temp_regions': temporary['regions'],
                       'boot_epoch': system['boot_epoch'], 'deleted_open_bytes': opened['bytes'],
                       'top_memory': [{k: p.get(k) for k in ('pid', 'name', 'footprint')} for p in system.get('processes', [])[:5]]}
             result = {'at': at, 'system': system, 'deleted_open': opened, 'temporary': temporary, 'previous': previous,

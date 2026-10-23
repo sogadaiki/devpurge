@@ -5,6 +5,7 @@ const buttons=[{}, {}, {}], timers=new Map();let serial=0, checks=0;
 const context=vm.createContext({
   window:{}, document:{addEventListener(){},querySelectorAll(){return buttons;}},
   busy:false, state:{progress:{running:false}},
+  bytes:n=>String(n)+' bytes',
   setTimeout(fn,delay){assert.equal(delay,300000);timers.set(++serial,fn);return serial;},
   clearTimeout(id){timers.delete(id);}, act:async fn=>fn(),
 });
@@ -26,5 +27,8 @@ vm.runInContext(fs.readFileSync(path.join(__dirname,'../ui/refresh.js'),'utf8'),
   assert.equal(vm.runInContext('appMemory({pid:1}).bytes',context),30);
   assert.equal(vm.runInContext('appMemory({pid:1}).partial',context),true);
   assert.equal(vm.runInContext('appMemory({pid:5}).bytes',context),null);
-  console.log('Refresh UI: busy recovery, bounded timer, skipped work and memory grouping passed');
+  assert.equal(vm.runInContext('temporaryLabel(null)',context),'未計測');
+  assert.equal(vm.runInContext('temporaryLabel({bytes:0})',context),'0 bytes');
+  assert.equal(vm.runInContext('temporaryLabel({bytes:null,regions:[{observed_bytes:100},{observed_bytes:50}]})',context),'確認できた範囲 150 bytes（一部は未確認）');
+  console.log('Refresh UI: busy recovery, bounded timer, memory grouping and partial coverage passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

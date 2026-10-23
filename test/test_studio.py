@@ -338,6 +338,14 @@ class StudioTest(unittest.TestCase):
         self.assertEqual(len(cmd.call_args_list),2)
         self.assertIsNone(result['bytes'])
 
+    def test_pressure_history_preserves_partial_temporary_observations(self):
+        temp={'bytes':None,'regions':[{'name':'user_temp','bytes':None,'observed_bytes':4096,'status':'partial'}]}
+        with patch.object(self.s,'system',return_value=self.pressure_system()), patch.object(module,'temporary_storage',return_value=temp), patch.object(module,'command',return_value=(1,'','')):
+            self.s.pressure()
+        last=self.s.load('pressure-history.json',[])[-1]
+        self.assertIsNone(last['temp_bytes'])
+        self.assertEqual(last['temp_regions'],temp['regions'])
+
     def test_pressure_failure_is_unknown_and_does_not_claim_zero(self):
         for reply in [(-1,'','timeout'), (1,'','permission denied')]:
             with patch.object(self.s,'system',return_value=self.pressure_system()), patch.object(module,'command',return_value=reply):

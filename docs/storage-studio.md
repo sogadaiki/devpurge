@@ -168,6 +168,9 @@ compare measured values. Calling the `pressure` API alone does not start a timer
 Two bounded `du` probes also record the user's OS temporary directory and
 `/private/tmp` (five seconds each). Partial access stays unknown; these working
 folders are never deletion targets. Other users' temporary data is not covered.
+Partial region observations remain visible and are retained in history even when
+their total is unknown. Allocated file sizes may include shared APFS extents;
+the observed total is not a prediction of reclaimable disk space.
 
 VM allocation (`df` on the VM volume), swap used/reserved (`sysctl`) and logical
 open-deleted file lengths overlap and are never added as reclaimable capacity.

@@ -5,6 +5,12 @@ const hasNativeRefresh = () => !!window.webkit?.messageHandlers?.refresh;
 function updateRefreshBusy() {
   document.querySelectorAll('[data-pressure],[data-app-rest],[data-app-check],[data-pressure-watch]').forEach(b=>b.disabled=busy||!!state.progress?.running);
 }
+function temporaryLabel(temporary) {
+  if(!temporary)return '未計測';
+  if(temporary.bytes!=null)return bytes(temporary.bytes);
+  const known=(temporary.regions||[]).filter(r=>r.observed_bytes!=null);
+  return known.length?'確認できた範囲 '+bytes(known.reduce((n,r)=>n+r.observed_bytes,0))+'（一部は未確認）':'未計測';
+}
 async function loadRefreshApps() {
   if(!hasNativeRefresh())return;
   const native=await nativeRefresh({action:'list'});
@@ -55,7 +61,7 @@ function renderRefresh() {
       <div class="metric"><span>削除後もアプリが開いているファイル</span><strong>${bytes(opened?.bytes)}</strong><p>${opened ? measured ? '確認できた '+opened.file_count+' 個 · 論理サイズ' : '一部のみ確認。全体の量は不明です' : 'チェックすると確認できます'}</p></div>
       <div class="metric"><span>いま使える空き容量</span><strong>${bytes(s?.free)}</strong><p>${esc(change)}</p></div>
     </div>
-    <p class="muted transient-note">OSの一時作業フォルダ ${bytes(p?.temporary?.bytes)} · 自分の一時領域と共有tmpを計測。保存途中のデータも含むため、この画面では削除しません。</p>
+    <p class="muted transient-note">OSの一時作業フォルダ ${temporaryLabel(p?.temporary)} · 自分の一時領域と共有tmpのファイルを計測。共有領域や未確認分があり、回収できる容量とは異なります。保存途中のデータも含むため、この画面では削除しません。</p>
     ${previous ? `<div class="pressure-change" role="status"><strong>${p.boot_changed ? '前回のチェック後に、Macが再起動されています。' : '前回のチェックと比べてみる'}</strong><p>${esc(date(previous.at))} の空き ${bytes(previous.free)} → 今 ${bytes(s.free)}<br>スワップの確保領域 ${bytes(previous.vm_volume_bytes)} → ${bytes(s.vm_volume_bytes)}</p>${p.comparison?.vm_volume_bytes_decrease>0?`<p>スワップ領域が ${bytes(p.comparison.vm_volume_bytes_decrease)} 縮みました。</p>`:''}<small>他の作業の増減も含みます。掃除だけの効果とは限りません。</small></div>` : ''}
     <div class="panel rest-panel"><span class="eyebrow">ONE APP · ONE BREATH</span><h3>ひとつずつ、休ませる。</h3><p>① アプリを開いて保存　→　② ひと休み　→　③ 戻った空きを実測</p><p class="muted">制作中・書き出し中のアプリは残しましょう。選んだアプリのすべてのウィンドウを通常終了します。確認画面で進むまで終了しません。</p>${renderRestApps()}</div>
     ${state.native_refresh?.length?`<div class="panel"><h3>ひと休みの結果</h3><p class="muted">終了の前後を同じ方法で計測します。他の作業の増減も含み、終了だけの効果とは限りません。</p>${renderRestHistory()}</div>`:''}
