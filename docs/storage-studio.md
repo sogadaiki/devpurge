@@ -6,17 +6,44 @@ Run `devpurge studio` (or `./bin/devpurge studio` from this checkout). A local
 browser UI opens. Keep that process running; Ctrl+C stops it. Python 3.9+ and
 macOS are required. No npm install, cloud account, telemetry or background job.
 `--no-open` prints the local URL; `--port 8766` selects a port.
-For a Finder/Spotlight launcher, run `python3 scripts/install-studio-app.py` from
-the permanent installed checkout. It creates `~/Applications/devpurge Studio.app`
-without replacing an existing application or registering a background job. The
-interface remains a browser UI; this is not a native SwiftUI application. Opening
-the launcher again reuses the existing Studio instance. The launcher depends on
-that checkout and the Python executable used during installation.
+For the native Mac application, run `python3 scripts/install-studio-app.py`.
+It builds `~/Applications/devpurge Studio.app` with an AppKit window, Dock icon,
+standard keyboard shortcuts and a Help menu. Open it directly from Finder or
+Spotlight. The UI uses macOS WebKit; an external browser or terminal is unnecessary.
+The app bundles the UI and diagnostic source, so it works independently of this
+checkout. It uses the existing Python executable selected during installation;
+if that interpreter is moved or removed, reinstall the app. Building requires
+Xcode/Command Line Tools and macOS12+; using the built app does not require Xcode.
+No npm dependencies, bundled Chromium or Python environment are installed.
+
+The installer compiles and verifies an ad-hoc signature before replacing an
+existing devpurge bundle. Other apps, symlink destinations and a running native
+app are refused. A failed installation rename restores the prior app. Temporary
+compiler outputs and the superseded bundle are removed after successful installation.
+This is a local personal build, not a notarized distribution for other Macs.
+`--output /absolute/path/Studio.app` selects a separate build destination.
+
+Opening again activates the existing window. Closing the last window or Cmd+Q
+ends its engine after accepted operations finish, without sending termination
+signals. Existing CLI engines are reused and left running when the app exits.
+An authenticated local handshake rejects stale URLs and redirects; native
+navigation stays on the exact local origin. WebKit uses an ephemeral data store.
+No launchd job or automatic login item is installed. Diagnostic records and
+receipts remain in Application Support across app restarts and updates.
 `devpurge diagnose` writes the same diagnostic JSON to stdout and saves the local
 baseline/history. It never deletes user files. It does write diagnostic state;
 the existing `devpurge -n` / archive dry-run semantics are unchanged.
 
 ## The five workflows
+
+### 毎日の使い方
+
+- 普段は「今日のお手入れ」でスキャンし、一つだけ確認。残す判断でも完了です。
+- 急に容量が減ったら「リフレッシュ」で測定。作業を保存して関連アプリを終了し、再測定します。スワップの即時解放や再起動と同じ回復量は保証しません。
+- 制作が終わったら「制作を完了する」。完成品と再編集に必要な素材を先に残し、中間物を確認します。
+- 取り消したいときは「整理と復元の履歴」。ゴミ箱への移動だけでは空き容量は増えません。
+
+このガイドはアプリの「ヘルプ」メニューからも読めます。
 
 1. **Overview:** actual volume free space, non-overlapping targeted inventory,
    incomplete measurements, growth since the last scan. A separate large-location
@@ -128,11 +155,13 @@ user data was deleted and no real daily completion was recorded by QA.
 
 ```
 python3 test/test_studio.py
+python3 test/test_native.py
 bash test/run_tests.sh
 python3 test/test_archive.py
 python3 test/test_triage_report.py
 node --check ui/app.js
 node --check ui/daily.js
+node --check ui/refresh.js
 ```
 
 Studio tests use temporary fake homes and mock external tools for mutation tests.
@@ -141,6 +170,13 @@ file changes, secret/protected names, symlinks, incomplete measurement, retained
 hashes, lsof failure, uv command construction, and Host/Origin/token guards.
 Real-user scan and browser QA are separate from these tests. No real cleanup is
 performed as a test.
+Native lifecycle tests use isolated fake homes: authenticated handshake, reuse of
+an existing engine, shutdown on pipe EOF, refusal of new operations during close,
+and completion of an already accepted operation before exit. Installer tests
+verify failed-build preservation, identity/running/link guards and rollback.
+
+Native APIs: [Apple WKWebView](https://developer.apple.com/documentation/webkit/wkwebview)
+and [AppKit window-close lifecycle](https://developer.apple.com/documentation/appkit/nsapplicationdelegate/applicationshouldterminateafterlastwindowclosed(_:)).
 
 ## Quick refresh diagnosis — 2026-10-23
 
