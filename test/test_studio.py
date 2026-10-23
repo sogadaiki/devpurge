@@ -221,6 +221,44 @@ class StudioTest(unittest.TestCase):
             row=next(line for line in source.splitlines() if '"'+id_+'|' in line)
             self.assertIn('|review|',row)
 
+    def test_daily_requires_successful_scan(self):
+        with self.assertRaisesRegex(ValueError,'スキャン'):
+            self.s.finish_daily({'decision':'reviewed'})
+        self.assertFalse((self.s.state/'daily.json').exists())
+
+    def test_daily_stamp_once_and_keep_never_mutates_files(self):
+        self.s.record_daily_scan('2026-10-23T00:00:00Z')
+        first=self.s.finish_daily({'decision':'keep','id':'pip'})
+        second=self.s.finish_daily({'decision':'reviewed'})
+        self.assertEqual(first['completed_days'],1)
+        self.assertEqual(first,second)
+        self.assertTrue(self.cache.exists())
+        self.assertEqual((self.cache/'wheel').read_text(),'fixture package')
+
+    def test_daily_cannot_claim_unknown_item_or_delete(self):
+        self.s.record_daily_scan('2026-10-23T00:00:00Z')
+        for data in [{'decision':'keep','id':'unknown'},{'decision':'delete','id':'pip'}]:
+            with self.assertRaises(ValueError):
+                self.s.finish_daily(data)
+        self.assertEqual(self.s.daily()['completed_days'],0)
+
+    def test_daily_persists_and_older_days_remain(self):
+        module.atomic_json(self.s.state/'daily.json',[{'day':'2000-01-01','completed_at':'2000-01-01T00:00:00Z'}])
+        self.s.record_daily_scan('2026-10-23T00:00:00Z')
+        self.s.finish_daily({'decision':'reviewed'})
+        loaded=module.Studio(self.home,self.s.state).daily()
+        self.assertEqual(loaded['completed_days'],2)
+        self.assertEqual(loaded['days'][0]['day'],'2000-01-01')
+
+    def test_daily_organization_reward_requires_real_receipt(self):
+        self.s.record_daily_scan('2026-10-23T00:00:00Z')
+        with self.assertRaises(ValueError):
+            self.s.finish_daily({'decision':'organized','id':'forged'})
+        receipt=self.apply(self.make_plan())
+        result=self.s.finish_daily({'decision':'organized','id':receipt['id']})
+        self.assertEqual(result['current']['decision'],'organized')
+        self.assertEqual(result['completed_days'],1)
+
     def test_host_origin_and_token_guards(self):
         server=module.Server(('127.0.0.1',0),module.handler(self.s,'test-token'))
         t=threading.Thread(target=server.serve_forever,daemon=True);t.start()
