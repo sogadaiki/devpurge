@@ -164,7 +164,7 @@ open (other views may be used). Busy scans/actions are skipped; sleep or WebKit
 timer throttling can delay samples. It defaults off and stops on window close or
 reload. It installs no launchd job. `pressure-history.json` retains up to2,048
 samples, including five memory leaders, so a later check across reboot can
-compare measured values. CLI `pressure` checks do not start a timer.
+compare measured values. Calling the `pressure` API alone does not start a timer.
 Two bounded `du` probes also record the user's OS temporary directory and
 `/private/tmp` (five seconds each). Partial access stays unknown; these working
 folders are never deletion targets. Other users' temporary data is not covered.
