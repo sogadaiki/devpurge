@@ -95,6 +95,29 @@ Technical references:
 - [uv cache safety and pruning](https://docs.astral.sh/uv/concepts/cache/)
 - [Apple storage guidance](https://support.apple.com/en-gb/102624)
 
+## Daily care experience — 2026-10-23
+
+The opening screen is a small daily ritual: scan, decide on one item, then receive
+one stamp. Keeping an item is a valid decision. Deletion volume never earns points,
+missed days never erase history, and scans alone do not award completion. Successful
+cleanup stamps require a matching receipt from today. Records remain local in
+`daily.json`; repeat completion is idempotent.
+
+Reference: [Forest](https://www.forestapp.cc/), visually inspected for the warm
+plant-centered atmosphere, generous space and welcoming primary action. Adopt the
+calm daily ritual; omit countdown pressure and streak penalties. The original
+mint cleaning companion in `ui/assets/companion.png` was generated for this project
+with imagegen on 2026-10-23, then copied without visual modification. It is not a
+Forest asset. The user requested enjoyable, game-like interaction; acceptance of
+this implementation remains open.
+
+Controls have pressed-state motion, the companion responds to touch, real scan
+progress animates the scene, and completion has a short sparkle celebration.
+Optional synthesized sound defaults off. Reduced-motion preferences disable
+animation. Browser QA verified scan-to-decision on the real read-only scan and
+completion/reload persistence in an isolated disposable fixture home; no real
+user data was deleted and no real daily completion was recorded by QA.
+
 ## Verify
 
 ```
@@ -103,6 +126,7 @@ bash test/run_tests.sh
 python3 test/test_archive.py
 python3 test/test_triage_report.py
 node --check ui/app.js
+node --check ui/daily.js
 ```
 
 Studio tests use temporary fake homes and mock external tools for mutation tests.

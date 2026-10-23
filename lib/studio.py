@@ -251,10 +251,14 @@ class Studio:
         for relative in ('Downloads', 'Movies', 'Documents', '.cache', '.codex', '.claude'):
             specs.append((self.home/relative, 'other', relative, 'ユーザーの保存領域', 'review'))
         results = []
+        self.progress.update(message='プロジェクト・アプリの保存量を計測中', done=0, total=len(specs), phase='landscape')
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-            for item in pool.map(self.measure, specs):
+            jobs = [pool.submit(self.measure, s) for s in specs]
+            for job in concurrent.futures.as_completed(jobs):
+                item = job.result()
                 if item:
                     results.append(item)
+                self.progress['done'] += 1
                 self.progress['message'] = 'プロジェクト・アプリの保存量を計測中'
         return sorted(results, key=lambda i: i['bytes'] or i.get('observed_bytes') or 0, reverse=True)
 
@@ -291,6 +295,7 @@ class Studio:
             history = self.load('history.json', [])
             history.append({'at': self.result['at'], 'free': self.result['system']['free'], 'swap_used': self.result['system']['swap_used'], 'measured': sum(i['bytes'] or 0 for i in kept)})
             atomic_json(self.state / 'history.json', history[-90:])
+            self.record_daily_scan(self.result['at'])
             return self.result
         finally:
             self.progress['running'] = False
@@ -301,6 +306,45 @@ class Studio:
             return json.loads((self.state / name).read_text())
         except (OSError, ValueError):
             return fallback
+
+    def daily(self):
+        today = dt.datetime.now().astimezone().date().isoformat()
+        days = self.load('daily.json', [])
+        return {'today': today, 'days': days, 'completed_days': sum(bool(d.get('completed_at')) for d in days), 'current': next((d for d in days if d['day'] == today), None)}
+
+    def record_daily_scan(self, at):
+        daily = self.daily()
+        days = daily['days']
+        current = daily['current']
+        if current is None:
+            current = {'day': daily['today']}
+            days.append(current)
+        current['scan_at'] = at
+        atomic_json(self.state / 'daily.json', days)
+
+    def finish_daily(self, data):
+        with self.lock:
+            daily = self.daily()
+            current = daily['current']
+            if not current or not current.get('scan_at'):
+                raise ValueError('まず今日のスキャンを完了してください')
+            if data.get('decision') not in ('keep', 'reviewed', 'organized', 'refreshed'):
+                raise ValueError('今日の判断を選んでください')
+            if data['decision'] == 'keep':
+                result = self.result or self.load('latest.json', {})
+                if data.get('id') not in {i['id'] for i in result.get('items', [])}:
+                    raise ValueError('確認した項目が見つかりません')
+            if data['decision'] in ('organized', 'refreshed'):
+                receipts = self.receipts() if data['decision'] == 'organized' else [json.loads(p.read_text()) for p in (self.state / 'refresh').glob('refresh-*.json')]
+                receipt = next((r for r in receipts if r['id'] == data.get('id')), None)
+                required = 'moved' if data['decision'] == 'organized' else 'completed'
+                if not receipt or receipt.get('status') != required or dt.datetime.fromisoformat(receipt['at']).astimezone().date().isoformat() != daily['today']:
+                    raise ValueError('今日完了した整理の記録を確認できません')
+            # One stamp per day, never per byte removed or repeated click.
+            if not current.get('completed_at'):
+                current.update(completed_at=dt.datetime.now(dt.timezone.utc).isoformat(), decision=data['decision'], item_id=data.get('id'))
+                atomic_json(self.state / 'daily.json', daily['days'])
+            return self.daily()
 
     def keeper_hash(self, path):
         path = self.physical(Path(path))
@@ -600,7 +644,7 @@ def handler(studio, token):
         def send(self, code, data, kind='application/json'):
             payload = json.dumps(data, ensure_ascii=False).encode() if kind == 'application/json' else data
             self.send_response(code)
-            self.send_header('Content-Type', kind + '; charset=utf-8')
+            self.send_header('Content-Type', kind + ('; charset=utf-8' if kind.startswith('text/') or kind == 'application/json' else ''))
             self.send_header('Content-Length', str(len(payload)))
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
@@ -621,7 +665,7 @@ def handler(studio, token):
             if self.headers.get('Host') != host:
                 return self.send(403, {'error': 'ローカルアクセスのみ許可します'})
             path = urllib.parse.urlsplit(self.path).path
-            assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+            assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css'), '/daily.js': ('daily.js', 'text/javascript'), '/daily.css': ('daily.css', 'text/css'), '/assets/companion.png': ('assets/companion.png', 'image/png')}
             if path in assets:
                 name, kind = assets[path]
                 return self.send(200, (ROOT / 'ui' / name).read_bytes(), kind)
@@ -629,7 +673,7 @@ def handler(studio, token):
                 return self.send(403, {'error': '起動時のURLから開いてください'})
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
-                return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'finals': studio.final_suggestions()})
+                return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'finals': studio.final_suggestions(), 'daily': studio.daily()})
             return self.send(404, {'error': '見つかりません'})
 
         def do_POST(self):
@@ -665,6 +709,8 @@ def handler(studio, token):
                     return self.send(200, studio.reveal(data.get('id')))
                 if self.path == '/api/browse':
                     return self.send(200, studio.browse(data.get('id')))
+                if self.path == '/api/daily-finish':
+                    return self.send(200, studio.finish_daily(data))
                 if self.path == '/api/apply':
                     return self.send(200, studio.apply(data.get('id')))
                 if self.path == '/api/restore':
