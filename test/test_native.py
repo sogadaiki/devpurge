@@ -29,6 +29,15 @@ installer = load('installer', ROOT / 'scripts/install-studio-app.py')
 
 
 class NativeLifecycle(unittest.TestCase):
+    def test_local_start_does_not_perform_dns_lookup(self):
+        with tempfile.TemporaryDirectory() as temp, patch('socket.getfqdn', side_effect=AssertionError('Unexpected DNS lookup')):
+            server = studio.Server(('127.0.0.1', 0), studio.handler(studio.Studio(temp), 'fixture'))
+            try:
+                self.assertEqual(server.server_name, '127.0.0.1')
+                self.assertGreater(server.server_port, 0)
+            finally:
+                server.server_close()
+
     def test_owned_engine_handoff_and_eof_shutdown(self):
         with tempfile.TemporaryDirectory() as temp:
             argv = [sys.executable, '-B', str(ROOT / 'lib/studio.py'), 'studio', '--native']
@@ -53,7 +62,13 @@ class NativeLifecycle(unittest.TestCase):
             finally:
                 if child.poll() is None:
                     child.stdin.close()
-                    child.wait(timeout=5)
+                    try:
+                        child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        # This is only our disposable test child, never a real
+                        # user's engine. Preserve the original assertion error.
+                        child.kill()
+                        child.wait(timeout=5)
                 child.stdout.close()
                 child.stderr.close()
 
@@ -68,12 +83,14 @@ class NativeLifecycle(unittest.TestCase):
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     urllib.request.urlopen(url + '/api/health', timeout=5)
                 self.assertEqual(error.exception.code, 403)
+                error.exception.close()
                 server.closing.set()
                 request = urllib.request.Request(url + '/api/apply', data=b'{"id":"x"}', headers={'Content-Type': 'application/json', 'X-Studio-Token': 'fixture'})
                 with patch.object(engine, 'apply') as apply:
                     with self.assertRaises(urllib.error.HTTPError) as error:
                         urllib.request.urlopen(request, timeout=5)
                     self.assertEqual(error.exception.code, 503)
+                    error.exception.close()
                     apply.assert_not_called()
             finally:
                 server.shutdown(); server.server_close(); thread.join()

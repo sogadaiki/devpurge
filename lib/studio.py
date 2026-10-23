@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import socketserver
 import stat
 import subprocess
 import sys
@@ -735,6 +736,12 @@ class Server(http.server.ThreadingHTTPServer):
         self.closing = threading.Event()
         self.scan_thread = None
         super().__init__(*args, **kwargs)
+
+    def server_bind(self):
+        # HTTPServer normally reverse-resolves even a numeric loopback address.
+        # This local-only service must start without a DNS/network dependency.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     def stop_after_input(self, stream):
         try:
