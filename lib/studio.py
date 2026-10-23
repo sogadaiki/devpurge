@@ -521,18 +521,19 @@ class Studio:
             s = p.lstat()
             link = stat.S_ISLNK(s.st_mode)
             # Only the official uv command may handle cache links. uv's build
-            # environments also link to its managed Python executable. These
+            # environments also link to retained Python executables. These
             # references are inspected without traversing/moving the target.
             if link and uv_cache:
                 try:
                     target = p.resolve()
                 except (OSError, RuntimeError) as e:
                     raise ValueError('リンク先を確認できないため保持します') from e
-                managed_python = (p.parent.name == 'bin' and re.fullmatch(r'python(?:\d+(?:\.\d+)?)?', p.name)
-                                  and inside(target, self.home / '.local/share/uv/python')
+                python_roots = (self.home / '.local/share/uv/python', Path('/Library/Frameworks/Python.framework/Versions'))
+                retained_python = (p.parent.name == 'bin' and re.fullmatch(r'python(?:\d+(?:\.\d+)?)?', p.name)
+                                  and any(inside(target, root) for root in python_roots)
                                   and target.parent.name == 'bin' and re.fullmatch(r'python\d+\.\d+', target.name)
                                   and target.is_file())
-                if (not inside(target, path) and not managed_python) or self.blocked(target):
+                if (not inside(target, path) and not retained_python) or self.blocked(target):
                     raise ValueError('キャッシュ外へのリンクを含むため保持します')
             elif link or not (stat.S_ISREG(s.st_mode) or stat.S_ISDIR(s.st_mode)):
                 raise ValueError('リンクまたは特殊ファイルを含むため保持します')

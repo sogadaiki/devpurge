@@ -53,7 +53,7 @@ the existing `devpurge -n` / archive dry-run semantics are unchanged.
 - Per-path configuration exclusions, archive opt-in root, protected names,
   `.env*`, `.git`, `.devpurge-keep`, links and special files are retained.
   Only official uv pruning permits internal cache links and `bin/python*` links
-  to uv-managed Python executables, without traversing the target. Other external
+  to uv-managed or Python.org macOS framework executables, without traversing the target. Other external
   links and protected targets still block the plan.
   Trash and intermediate cleanup continue to reject every link.
 - Plans expire after five minutes and are single-use. Metadata identity is checked
@@ -161,7 +161,7 @@ No measurements can attribute a historical reboot recovery before the first
 sample. Swap is OS-managed; this feature never removes VM files or invokes purge.
 Official references: [Apple Activity Monitor memory](https://support.apple.com/en-euro/guide/activity-monitor/actmntr1004/mac)
 and [lsof documentation](https://lsof.readthedocs.io/en/latest/manpage/).
-uv cache links (including build-environment references to retained managed Python)
+uv cache links (including build-environment references to retained managed/framework Python)
 are supported while retaining stale-plan,24-hour recency, process
 activity and exclusion guards. Running package managers may legitimately block
 refresh. Never use force to work around this. Centralized environments inside the

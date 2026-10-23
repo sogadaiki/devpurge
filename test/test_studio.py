@@ -257,6 +257,19 @@ class StudioTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.s.tree(uv,uv_cache=True)
 
+    def test_uv_framework_python_link_does_not_touch_external_target(self):
+        uv = self.home/'.cache/uv'
+        bindir = uv/'archive-v0/fixture/bin'
+        bindir.mkdir(parents=True)
+        link = bindir/'python3'
+        link.symlink_to('/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12')
+        # No fixture writes outside the temporary home. Only metadata existence
+        # is mocked for an interpreter that may not be installed on CI.
+        with patch.object(Path,'is_file',return_value=True):
+            self.assertEqual(self.s.tree(uv,uv_cache=True)['count'],5)
+        with self.assertRaises(ValueError):
+            self.s.tree(uv)
+
     def test_deleted_open_inodes_deduplicated_and_shared_owners(self):
         record = 'f3\ntREG\nD0x1\ns1024\ni44\nk0\n'
         result = module.deleted_open_files('p12\ncEditor\n'+record+record+'p13\ncPython\n'+record)
