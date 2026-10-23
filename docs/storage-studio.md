@@ -58,12 +58,14 @@ the existing `devpurge -n` / archive dry-run semantics are unchanged.
    editing inputs are kept: the tool cannot prove that an MP4 preserves a Premiere
    project, voice stems, source assets or all future editing capability.
 4. **Refresh:** a quick check independent of the folder scan measures free space,
-   swap, RAM, boot time, RSS and deleted files still held open by processes.
-   Before/after checks detect reboot and compare actual free space and swap.
+   used/reserved swap, VM volume allocation, RAM, boot time, physical memory
+   footprint and deleted files still held open by processes. Native users can
+   inspect an app, confirm saved work and request its normal exit. Before/after
+   checks detect reboot and compare actual free space and swap allocation.
    Official `uv cache prune` is available through a
    separate explicit review. It is permanent, not Trash/restore; reclaimed bytes
    are unknown before execution. No force, no `--ci`, no network, no reboot,
-   process termination, swap unlinking or snapshot thinning.
+   forced termination, swap unlinking or snapshot thinning.
 5. **Restore:** journaled same-volume Trash moves, with refusal to overwrite a
    recreated source. Moving to Trash does not free disk space. Emptying Trash is
    deliberately left to Finder and removes the ability to restore.
@@ -127,6 +129,54 @@ context and capacity. The user has not yet accepted the design.
 Technical references:
 - [uv cache safety and pruning](https://docs.astral.sh/uv/concepts/cache/)
 - [Apple storage guidance](https://support.apple.com/en-gb/102624)
+- [Apple normal application termination](https://developer.apple.com/documentation/appkit/nsrunningapplication/terminate())
+
+## Safe refresh — 2026-10-23
+
+Native v0.10.0 adds **ひとつずつ、休ませる**. A native-only, main-frame,
+exact-origin WebKit bridge lists ordinary GUI applications. It accepts opaque
+five-minute tickets, never a caller-supplied PID/path/command. PID, launch date,
+bundle ID and bundle URL are checked again after the native confirmation and
+immediately before the quit request. Finder, Studio, Codex/ChatGPT, Claude,
+terminals and known development editors are protected. Background processes and
+CLI jobs are not termination targets. Protection is checked by native code,
+not just by hiding a button.
+
+The user must confirm that work is saved and jobs/exports/uploads have ended.
+Normal quit affects every window of that app; some apps do not ask to save.
+`NSRunningApplication.terminate()` only sends a normal request. Its Boolean is
+not treated as proof of exit: Studio observes `isTerminated`, waits up to15s,
+then leaves pending/refused apps intact. **終了したか確認する** observes only;
+it never repeats termination or escalates to force. If Studio restarts, an old
+pending record remains unverified. No bulk close or automatic restart is offered.
+
+A measurement and private write-ahead receipt must succeed before requesting
+exit. A completed receipt requires observed exit and a second measurement.
+`native-refresh-history.json` keeps60 receipts with before/after free bytes,
+swap and VM allocation. No savings are promised; concurrent activity can make
+the net change negative. A cancelled save dialog is not success. The source and
+manual acceptance instructions for a disposable GUI fixture are in
+`test/RefreshFixture.swift`; it retains an original and saves a note while holding
+a128MiB unlinked file. It is never included in the installed app.
+
+The optional **見守り** switch samples about every5min while the page remains
+open (other views may be used). Busy scans/actions are skipped; sleep or WebKit
+timer throttling can delay samples. It defaults off and stops on window close or
+reload. It installs no launchd job. `pressure-history.json` retains up to2,048
+samples, including five memory leaders, so a later check across reboot can
+compare measured values. CLI `pressure` checks do not start a timer.
+Two bounded `du` probes also record the user's OS temporary directory and
+`/private/tmp` (five seconds each). Partial access stays unknown; these working
+folders are never deletion targets. Other users' temporary data is not covered.
+
+VM allocation (`df` on the VM volume), swap used/reserved (`sysctl`) and logical
+open-deleted file lengths overlap and are never added as reclaimable capacity.
+Physical footprint is obtained through Darwin `proc_pid_rusage` metadata; unknown
+permissions remain unknown. Descendants are grouped under GUI apps for a reference
+memory total; reparented helpers may be missing. Memory is not disk savings.
+No memory contents, process arguments, user-file contents or privileged data are
+read by these probes. A previous reboot's200GB recovery cannot be reconstructed
+from current sizes or cumulative write counts alone.
 
 ## Daily care experience — 2026-10-23
 

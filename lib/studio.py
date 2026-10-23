@@ -6,6 +6,7 @@ revalidation, activity checks and a durable write-ahead recovery journal.
 """
 import argparse
 import concurrent.futures
+import ctypes
 from collections import deque
 import datetime as dt
 import fcntl
@@ -104,6 +105,71 @@ def deleted_open_files(output):
     processes = [{'pid': p['pid'], 'name': p['name'], 'bytes': sum(files[k] for k in p['files']), 'files': len(p['files'])} for p in owners.values() if p['files']]
     return {'observed_bytes': sum(files.values()), 'file_count': len(files), 'incomplete': incomplete,
             'processes': sorted(processes, key=lambda p: p['bytes'], reverse=True)[:12]}
+
+
+def process_footprint(pid):
+    """Metadata only, including compressed memory; never inspect process memory.
+
+    Darwin's public rusage_info_v0 ABI (sys/resource.h). Unknown is not zero.
+    Physical footprint is a memory accounting measure, NOT reclaimable disk.
+    """
+    if sys.platform != 'darwin':
+        return None
+    class Usage(ctypes.Structure):
+        _fields_ = [('uuid', ctypes.c_uint8 * 16)] + [(key, ctypes.c_uint64) for key in
+            ('user', 'system', 'idle', 'interrupts', 'pageins', 'wired', 'resident', 'footprint', 'start', 'exit')]
+    try:
+        function = ctypes.CDLL('/usr/lib/libproc.dylib').proc_pid_rusage
+        function.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+        function.restype = ctypes.c_int
+        usage = Usage()
+        return int(usage.footprint) if function(pid, 0, ctypes.byref(usage)) == 0 else None
+    except (OSError, AttributeError):
+        return None
+
+
+def swap_values(output, code=0):
+    values = {}
+    for field, key in [('used', 'swap_used'), ('total', 'swap_reserved')]:
+        match = re.search(r'\b' + field + r'\s*=\s*([\d.]+)([MG])', output)
+        values[key] = int(float(match[1]) * 1024 ** (2 if match[2] == 'M' else 3)) if code == 0 and match else None
+    return values
+
+
+def pressure_change(previous, current):
+    """Compare overlapping gauges separately; never add them as savings."""
+    if not previous:
+        return None
+    result = {'free_delta': current['free'] - previous['free'], 'reboot': bool(
+        previous.get('boot_epoch') and current.get('boot_epoch') and previous['boot_epoch'] != current['boot_epoch'])}
+    for key in ('swap_used', 'swap_reserved', 'vm_volume_bytes', 'deleted_open_bytes', 'temp_bytes'):
+        a, b = previous.get(key), current.get(key)
+        result[key + '_decrease'] = a - b if a is not None and b is not None else None
+    return result
+
+
+def temporary_storage():
+    """Bounded metadata-only probes; no enumeration in the API and no cleanup.
+
+    User T and /private/tmp are distinct. Other users' folders and protected OS
+    caches remain outside coverage. Permission errors must not become zero.
+    """
+    code, path, _ = command(['/usr/bin/getconf', 'DARWIN_USER_TEMP_DIR'], timeout=5)
+    resolved = Path(path.strip()).resolve() if code == 0 and path.strip().startswith('/') else None
+    user_temp = resolved if resolved and any(inside(resolved, Path(root)) for root in ('/private/var/folders', '/var/folders')) else None
+    rows = []
+    for name, target in [('user_temp', user_temp), ('shared_temp', Path('/private/tmp'))]:
+        if target is None:
+            rows.append({'name': name, 'bytes': None, 'observed_bytes': None, 'status': 'unknown'})
+            continue
+        code, out, error = command(['/usr/bin/du', '-sk', str(target)], timeout=5)
+        fields = out.strip().split(None, 1)
+        observed = int(fields[0])*1024 if fields and fields[0].isdigit() else None
+        valid = code == 0 and not error.strip() and observed is not None
+        rows.append({'name': name, 'bytes': observed if valid else None, 'observed_bytes': observed,
+                     'status': 'observed' if valid else 'partial' if observed is not None else 'unknown'})
+    return {'bytes': sum(r['bytes'] for r in rows) if all(r['bytes'] is not None for r in rows) else None,
+            'regions': rows}
 
 
 class Studio:
@@ -270,30 +336,36 @@ class Studio:
     def system(self):
         usage = shutil.disk_usage(self.home)
         code, swap, _ = command(['sysctl', 'vm.swapusage'])
-        match = re.search(r'used = ([\d.]+)M', swap)
         _, uptime, _ = command(['uptime'])
         scode, snapshots, _ = command(['tmutil', 'listlocalsnapshots', '/'])
-        pcode, processes, _ = command(['ps', '-axo', 'pid=,rss=,comm='])
+        pcode, processes, _ = command(['ps', '-axo', 'pid=,ppid=,rss=,comm='])
         rcode, ram, _ = command(['sysctl', '-n', 'hw.memsize'])
         bcode, boot, _ = command(['sysctl', 'kern.boottime'])
         boot_match = re.search(r'\bsec\s*=\s*(\d+)', boot)
+        vcode, volume, _ = command(['/bin/df', '-k', '/System/Volumes/VM'])
+        fields = volume.splitlines()[-1].split() if volume.strip() else []
+        vm_bytes = int(fields[2]) * 1024 if vcode == 0 and len(fields) >= 6 and fields[2].isdigit() and fields[-1] == '/System/Volumes/VM' else None
         top = []
         for line in processes.splitlines():
-            parts = line.strip().split(None, 2)
-            if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
-                top.append({'pid': int(parts[0]), 'bytes': int(parts[1]) * 1024, 'name': Path(parts[2]).name})
+            parts = line.strip().split(None, 3)
+            if len(parts) == 4 and all(p.isdigit() for p in parts[:3]) and len(top) < 2000:
+                pid = int(parts[0])
+                top.append({'pid': pid, 'parent': int(parts[1]), 'bytes': int(parts[2]) * 1024,
+                            'footprint': process_footprint(pid), 'name': Path(parts[3]).name})
         return {'total': usage.total, 'free': usage.free, 'used': usage.used,
-                'swap_used': int(float(match[1]) * 1024**2) if code == 0 and match else None,
+                **swap_values(swap, code), 'vm_volume_bytes': vm_bytes,
                 'ram': int(ram.strip()) if rcode == 0 and ram.strip().isdigit() else None,
                 'boot_epoch': int(boot_match[1]) if bcode == 0 and boot_match else None,
                 'uptime': uptime.strip(), 'snapshots': snapshots.strip() if scode == 0 else None,
-                'processes': sorted(top, key=lambda p: p['bytes'], reverse=True)[:12],
+                'processes': sorted(top, key=lambda p: p['footprint'] if p['footprint'] is not None else p['bytes'], reverse=True)[:20],
+                'process_tree': top,
                 'process_status': 'ok' if pcode == 0 else 'unknown'}
 
     def pressure(self):
         """Quick read-only diagnosis, independent of the full folder scan."""
         with self.lock:
             system = self.system()
+            temporary = temporary_storage()
             # No file names, command arguments, contents, sudo, or process control.
             code, output, error = command(['/usr/sbin/lsof', '-nP', '+L1', '-F', 'pcftsiDk'], timeout=15)
             opened = deleted_open_files(output)
@@ -304,11 +376,15 @@ class Studio:
             previous = history[-1] if history else None
             at = dt.datetime.now(dt.timezone.utc).isoformat()
             sample = {'at': at, 'free': system['free'], 'swap_used': system['swap_used'],
-                      'boot_epoch': system['boot_epoch'], 'deleted_open_bytes': opened['bytes']}
-            result = {'at': at, 'system': system, 'deleted_open': opened, 'previous': previous,
+                      'swap_reserved': system.get('swap_reserved'), 'vm_volume_bytes': system.get('vm_volume_bytes'),
+                      'temp_bytes': temporary['bytes'],
+                      'boot_epoch': system['boot_epoch'], 'deleted_open_bytes': opened['bytes'],
+                      'top_memory': [{k: p.get(k) for k in ('pid', 'name', 'footprint')} for p in system.get('processes', [])[:5]]}
+            result = {'at': at, 'system': system, 'deleted_open': opened, 'temporary': temporary, 'previous': previous,
+                      'comparison': pressure_change(previous, sample),
                       'free_delta': system['free'] - previous['free'] if previous else None,
                       'boot_changed': bool(previous and previous.get('boot_epoch') and system['boot_epoch'] and previous['boot_epoch'] != system['boot_epoch'])}
-            atomic_json(self.state / 'pressure-history.json', (history + [sample])[-120:])
+            atomic_json(self.state / 'pressure-history.json', (history + [sample])[-2048:])
             atomic_json(self.state / 'pressure.json', result)
             return result
 
@@ -798,7 +874,7 @@ def handler(studio, token):
                 return self.send(200, {'app': 'devpurge-studio', 'protocol': 1, 'closing': self.server.closing.is_set()})
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
-                return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'pressure': studio.load('pressure.json', None), 'pressure_history': studio.load('pressure-history.json', []), 'finals': studio.final_suggestions(), 'daily': studio.daily()})
+                return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'native_refresh': studio.load('native-refresh-history.json', []), 'pressure': studio.load('pressure.json', None), 'pressure_history': studio.load('pressure-history.json', []), 'finals': studio.final_suggestions(), 'daily': studio.daily()})
             return self.send(404, {'error': '見つかりません'})
 
         def do_POST(self):

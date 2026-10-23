@@ -29,6 +29,15 @@ installer = load('installer', ROOT / 'scripts/install-studio-app.py')
 
 
 class NativeLifecycle(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'darwin', 'AppKit requires macOS')
+    def test_native_refresh_identity_and_protection(self):
+        with tempfile.TemporaryDirectory() as temp:
+            binary = Path(temp)/'policy'
+            subprocess.run(['/usr/bin/xcrun', 'swiftc', '-swift-version', '5', '-module-cache-path', str(Path(temp)/'cache'),
+                            str(ROOT/'native/Refresh.swift'), str(ROOT/'test/refresh_policy.swift'), '-o', str(binary)], check=True, capture_output=True)
+            result = subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+            self.assertIn('checks passed', result.stdout)
+
     def test_local_start_does_not_perform_dns_lookup(self):
         with tempfile.TemporaryDirectory() as temp, patch('socket.getfqdn', side_effect=AssertionError('Unexpected DNS lookup')):
             server = studio.Server(('127.0.0.1', 0), studio.handler(studio.Studio(temp), 'fixture'))
