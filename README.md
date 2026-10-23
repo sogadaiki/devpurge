@@ -2,6 +2,12 @@
 
 ## Storage Studio
 
+Open **devpurge Studio.app** for a dedicated Mac window, daily care, diagnosis
+and recovery. Build/install locally with `python3 scripts/install-studio-app.py`
+(macOS12+, Swift toolchain and Python3.9+). The app lives in `~/Applications/`,
+bundles its UI/engine source and uses your existing Python. No external browser,
+terminal, cloud account or source checkout is needed to use the installed app.
+
 `devpurge studio` opens a local dashboard for understanding AI development storage:
 project/application size, Python environments, temporary data, growth, reviewed
 cleanup, production-completion records and Trash restoration. `devpurge diagnose`

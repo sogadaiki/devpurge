@@ -19,6 +19,7 @@ import secrets
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 import time
 import unicodedata
@@ -727,11 +728,31 @@ class Studio:
 
 
 class Server(http.server.ThreadingHTTPServer):
-    daemon_threads = True
+    # Closing the native window must let already accepted operations finish.
+    daemon_threads = False
+
+    def __init__(self, *args, **kwargs):
+        self.closing = threading.Event()
+        self.scan_thread = None
+        super().__init__(*args, **kwargs)
+
+    def stop_after_input(self, stream):
+        try:
+            stream.read()
+        finally:
+            self.closing.set()
+            self.shutdown()
+
+    def server_close(self):
+        super().server_close()  # joins active HTTP operations, including moves
+        if self.scan_thread:
+            self.scan_thread.join()
 
 
 def handler(studio, token):
     class Handler(http.server.BaseHTTPRequestHandler):
+        timeout = 15
+
         def log_message(self, *_):
             pass  # no paths/tokens in access logs
 
@@ -766,6 +787,8 @@ def handler(studio, token):
                 return self.send(200, (ROOT / 'ui' / name).read_bytes(), kind)
             if not self.authorized():
                 return self.send(403, {'error': '起動時のURLから開いてください'})
+            if path == '/api/health':
+                return self.send(200, {'app': 'devpurge-studio', 'protocol': 1, 'closing': self.server.closing.is_set()})
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
                 return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'pressure': studio.load('pressure.json', None), 'pressure_history': studio.load('pressure-history.json', []), 'finals': studio.final_suggestions(), 'daily': studio.daily()})
@@ -774,6 +797,8 @@ def handler(studio, token):
         def do_POST(self):
             if not self.authorized():
                 return self.send(403, {'error': '操作を許可できません'})
+            if self.server.closing.is_set():
+                return self.send(503, {'error': '終了処理中です。整理が完了してからアプリを開いてください'})
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= 16000 or self.headers.get('Content-Type') != 'application/json':
@@ -790,7 +815,8 @@ def handler(studio, token):
                             studio.scan()
                         except Exception as e:
                             studio.progress = {'running': False, 'message': str(e), 'error': True, 'done': 0, 'total': 0}
-                    threading.Thread(target=run, daemon=True).start()
+                    self.server.scan_thread = threading.Thread(target=run)
+                    self.server.scan_thread.start()
                     return self.send(202, {'started': True})
                 if self.path == '/api/plan':
                     return self.send(200, studio.plan(data.get('ids')))
@@ -825,6 +851,7 @@ def main():
     parser.add_argument('command', choices=['studio', 'diagnose'])
     parser.add_argument('--port', type=int, default=0)
     parser.add_argument('--no-open', action='store_true')
+    parser.add_argument('--native', action='store_true', help='Private app handoff; exits safely when its input pipe closes')
     args = parser.parse_args()
     if os.geteuid() == 0:
         parser.error('sudoでは起動しないでください')
@@ -836,10 +863,13 @@ def main():
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        if args.command == 'studio' and not args.no_open:
+        if args.command == 'studio' and (args.native or not args.no_open):
             existing = studio.load('instance.json', {}).get('url', '')
             if re.fullmatch(r'http://127\.0\.0\.1:\d+/#[-_A-Za-z0-9]+', existing):
-                webbrowser.open(existing)
+                if args.native:
+                    print(json.dumps({'url': existing, 'owned': False}), flush=True)
+                else:
+                    webbrowser.open(existing)
                 return
         parser.error('Studioまたは診断がすでに動いています。先に終了してください')
     if args.command == 'diagnose':
@@ -849,13 +879,21 @@ def main():
     server = Server(('127.0.0.1', args.port), handler(studio, token))
     url = 'http://127.0.0.1:' + str(server.server_port) + '/#' + token
     atomic_json(studio.state / 'instance.json', {'pid': os.getpid(), 'url': url})
-    print('devpurge Storage Studio\n' + url + '\nCtrl+Cで終了。ファイルは自動削除しません。', flush=True)
-    if not args.no_open:
+    if args.native:
+        print(json.dumps({'url': url, 'owned': True}), flush=True)
+        threading.Thread(target=server.stop_after_input, args=(sys.stdin.buffer,), daemon=True).start()
+    else:
+        print('devpurge Storage Studio\n' + url + '\nCtrl+Cで終了。ファイルは自動削除しません。', flush=True)
+    if not args.no_open and not args.native:
         webbrowser.open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        pass
+    finally:
+        server.closing.set()
         server.server_close()
+        (studio.state / 'instance.json').unlink(missing_ok=True)
 
 
 if __name__ == '__main__':

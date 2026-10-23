@@ -29,6 +29,12 @@ jobs:
       - name: Verify Storage Studio safety and local API
         run: python3 test/test_studio.py
 
+      - name: Verify native lifecycle and installer rollback
+        run: python3 test/test_native.py
+
+      - name: Compile and verify native Mac application
+        run: python3 scripts/install-studio-app.py --output "$RUNNER_TEMP/devpurge Studio.app"
+
       - name: Verify --help
         run: ./bin/devpurge --help
 
