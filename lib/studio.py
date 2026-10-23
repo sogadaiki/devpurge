@@ -457,7 +457,7 @@ class Studio:
                 prior = old.get(i['id'], {}).get('bytes')
                 i['delta'] = i['bytes'] - prior if i['bytes'] is not None and prior is not None else None
             landscape = self.landscape()
-            self.result = {'at': dt.datetime.now(dt.timezone.utc).isoformat(), 'items': sorted(kept, key=lambda i: i['bytes'] or 0, reverse=True), 'landscape': landscape, 'system': self.system(), 'previous_at': previous.get('at'), 'discovery_limited': self.discovery_limited,
+            self.result = {'at': dt.datetime.now(dt.timezone.utc).isoformat(), 'items': sorted(kept, key=lambda i: i['bytes'] or 0, reverse=True), 'landscape': landscape, 'system': self.system(), 'finals': self.final_suggestions(), 'previous_at': previous.get('at'), 'discovery_limited': self.discovery_limited,
                            'scope': '既知のAI・開発キャッシュ、development配下4階層、作業コピー、ユーザー一時領域。全ディスクの網羅調査ではありません。'}
             atomic_json(self.state / 'latest.json', self.result)
             history = self.load('history.json', [])
@@ -888,7 +888,10 @@ def handler(studio, token):
                 return self.send(200, {'app': 'devpurge-studio', 'protocol': 1, 'closing': self.server.closing.is_set()})
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
-                return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'native_refresh': studio.load('native-refresh-history.json', []), 'pressure': studio.load('pressure.json', None), 'pressure_history': studio.load('pressure-history.json', []), 'finals': studio.final_suggestions(), 'daily': studio.daily()})
+                result = studio.result or studio.load('latest.json', None)
+                # Never enter Desktop on startup/status reads. Permission or
+                # provider stalls must not hold the whole diagnostic UI hostage.
+                return self.send(200, {'progress': studio.progress, 'result': result, 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'native_refresh': studio.load('native-refresh-history.json', []), 'pressure': studio.load('pressure.json', None), 'pressure_history': studio.load('pressure-history.json', []), 'finals': (result or {}).get('finals', []), 'daily': studio.daily()})
             return self.send(404, {'error': '見つかりません'})
 
         def do_POST(self):
