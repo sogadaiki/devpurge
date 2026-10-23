@@ -26,6 +26,9 @@ jobs:
       - name: Verify archive retention guards
         run: python3 test/test_archive.py
 
+      - name: Verify Storage Studio safety and local API
+        run: python3 test/test_studio.py
+
       - name: Verify --help
         run: ./bin/devpurge --help
 

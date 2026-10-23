@@ -1,5 +1,14 @@
 # devpurge
 
+## Storage Studio
+
+`devpurge studio` opens a local dashboard for understanding AI development storage:
+project/application size, Python environments, temporary data, growth, reviewed
+cleanup, production-completion records and Trash restoration. `devpurge diagnose`
+emits diagnostic JSON. Python 3.9+; no frontend dependencies or cloud service.
+
+See [Storage Studio workflows and safety boundaries](docs/storage-studio.md).
+
 > Purge hidden dev caches on macOS. Reclaim GBs from Claude Code, Codex, Cursor, node_modules, stale git worktrees, uv, Playwright, and 70+ more.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

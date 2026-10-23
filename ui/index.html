@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>devpurge · Storage Studio</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<aside class="sidebar"><a class="brand" href="#"><span class="brandmark">d</span>devpurge<span class="edition">STUDIO</span></a>
+<div class="machine"><span class="online"></span> このMac <small>ローカルで処理</small></div>
+<nav aria-label="メイン"><button data-view="overview" class="active"><span>◉</span> ストレージの全体像</button><button data-view="explore"><span>▦</span> データを調べる</button><button data-view="complete"><span>✓</span> 制作を完了する</button><button data-view="refresh"><span>↻</span> リフレッシュ</button><button data-view="history"><span>↶</span> 整理と復元の履歴</button></nav>
+<div class="sidebar-note"><span class="shield">◇</span><strong>残すものを、先に決める。</strong><p>原本・会話履歴・実行環境は保持。整理は確認してから。</p></div><footer>STORAGE STUDIO <span>LOCAL / 01</span></footer></aside>
+<main><header><div><span class="eyebrow">YOUR WORKSPACE, UNDERSTOOD</span><h1 id="page-title">ストレージの全体像</h1><p id="subtitle">何が増えているのか。何を残せばいいのか。</p></div><button id="scan" class="primary">↻ <span>このMacをスキャン</span></button></header>
+<div id="notice" role="status" aria-live="polite" hidden></div>
+<div id="scan-progress" hidden><span class="pulse"></span><span id="progress-text">調査中</span><progress id="progress" max="100" value="0"></progress></div>
+<section id="overview" class="view"></section>
+<section id="explore" class="view" hidden><div class="toolbar"><label class="search">⌕ <input id="search" placeholder="名前・プロジェクト・パスで探す" aria-label="データを検索"></label><select id="category" aria-label="種類で絞り込む"><option value="all">すべての種類</option></select><select id="sort" aria-label="並び順"><option value="size">容量が大きい順</option><option value="growth">増えた容量順</option></select></div><p class="muted">容量は占有量の目安です。回収できる容量とは異なります。詳細を開くと保持理由が分かります。</p><div id="items"></div><div class="selection"><span id="selected">未選択</span><button id="plan" class="primary" disabled>選択した項目を確認 →</button></div></section>
+<section id="complete" class="view" hidden><div class="intro"><span class="eyebrow">FINISH THE WORK. KEEP THE RESULT.</span><h2>完成したら、作業場所も片付ける。</h2><p>完成品と再編集に必要な原本を残して、中間フォルダの役目を終える。<br>ファイル名の「final」だけで、不要とは判断しません。</p></div><div class="split"><form id="complete-form" class="panel"><h3>制作完了を記録する</h3><label>制作名<input name="title" required placeholder="例：10月のインタビュー動画"></label><label>保持する完成品・原本<select id="final-choice" aria-label="完成品の候補"><option value="">完成品フォルダから選んで追加</option></select><textarea name="keepers" required rows="3" placeholder="1行につき1ファイル。内容のSHA-256を記録します。"></textarea></label><label>役目を終えた中間フォルダ<select id="intermediate-choice" aria-label="中間フォルダの候補"><option value="">スキャンで見つかった候補から追加</option></select><textarea name="intermediates" required rows="3" placeholder="development内のrenders / tmp / outputなど。1行につき1フォルダ。"></textarea></label><label class="check"><input name="acknowledged" type="checkbox" required>再編集に必要な原本・プロジェクト・設定を別の場所に保持し、この中間フォルダを手放せることを確認しました。</label><button class="primary" type="submit">完成品を検証して記録</button><p class="muted">この操作では移動しません。次の確認画面で対象を見直せます。</p></form><div><div class="principle"><span>01</span><h3>完成品を検証</h3><p>内容の指紋を保存。整理直前にも同じファイルが残っているか確認します。</p></div><div class="principle"><span>02</span><h3>変わったものは保持</h3><p>直近24時間の更新、使用中、保護対象、リンクを検出したら整理を止めます。</p></div><div class="principle"><span>03</span><h3>必要なら元に戻す</h3><p>中間物はゴミ箱へ。復元先に新しいデータがあれば上書きしません。</p></div></div></div><h3>制作完了の記録</h3><div id="completions"></div></section>
+<section id="refresh" class="view" hidden></section>
+<section id="history" class="view" hidden></section>
+<footer class="main-footer"><span id="freshness">スキャン待ち</span><span>ファイルの内容を外部へ送信しません</span></footer></main>
+<dialog id="detail"><button class="close" aria-label="閉じる">×</button><div id="detail-content"></div></dialog>
+<dialog id="confirmation"><button class="close" aria-label="閉じる">×</button><span class="eyebrow">REVIEW BEFORE CLEANUP</span><h2>この内容で整理します</h2><div id="plan-content"></div><button id="apply" class="primary">確認した対象をゴミ箱へ移動</button></dialog>
+<script src="/app.js"></script></body></html>

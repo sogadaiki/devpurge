@@ -16,6 +16,13 @@ while [[ -L "$DEVPURGE_SCRIPT" ]]; do
 done
 DEVPURGE_DIR="$(cd "$(dirname "$DEVPURGE_SCRIPT")/.." && pwd)"
 
+# Studio has its own read-only scanner and reviewed, recoverable actions.
+if [[ "${1:-}" == "studio" || "${1:-}" == "diagnose" ]]; then
+  DEVPURGE_STUDIO_COMMAND="$1"
+  shift
+  exec python3 "${DEVPURGE_DIR}/lib/studio.py" "$DEVPURGE_STUDIO_COMMAND" "$@"
+fi
+
 # ── Root detection (MUST run before loading libraries that use $HOME) ────────
 DEVPURGE_IS_ROOT=0
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -73,6 +80,8 @@ devpurge - Purge hidden dev caches on macOS
 
 USAGE
   devpurge [OPTIONS]
+  devpurge studio                     Open the local storage dashboard
+  devpurge diagnose                   Read-only storage diagnosis as JSON
   devpurge quarantine <path> [reason]   Move a path into quarantine (30d grace)
   devpurge quarantine --list            Show quarantined items
   devpurge quarantine --restore <ID>    Restore an item to its original path
