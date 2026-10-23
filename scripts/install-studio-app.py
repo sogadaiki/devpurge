@@ -44,11 +44,15 @@ def build(app, root, python):
             'StudioPython': str(python),
             'NSAppTransportSecurity': {'NSAllowsLocalNetworking': True}}
     (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
+    architecture = os.uname().machine
+    if architecture not in ('arm64', 'x86_64'):
+        raise ValueError('Unsupported Mac architecture: ' + architecture)
     subprocess.run(['/usr/bin/xcrun', 'swiftc', '-O', '-swift-version', '5',
+                    '-target', architecture + '-apple-macosx12.0',
                     '-module-cache-path', str(app.parent / 'module-cache'),
                     '-framework', 'Cocoa', '-framework', 'WebKit',
                     str(root / 'native/StudioApp.swift'), '-o', str(macos / 'studio')],
-                   check=True, env={**os.environ, 'MACOSX_DEPLOYMENT_TARGET': '12.0'})
+                   check=True)
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)], check=True)
     subprocess.run(['/usr/bin/codesign', '--verify', '--strict', str(app)], check=True)
 
