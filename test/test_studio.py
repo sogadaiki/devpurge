@@ -208,6 +208,117 @@ class StudioTest(unittest.TestCase):
         self.assertEqual(cmd.call_args.args[0],['/usr/local/bin/uv','cache','prune','--cache-dir',str(uv),'--offline','--no-config','--no-progress'])
         self.assertTrue(uv.exists())  # mocked tool, no real deletion
 
+    def test_uv_internal_links_supported_only_for_official_prune(self):
+        uv = self.home/'.cache/uv'
+        uv.mkdir(parents=True)
+        (uv/'archive').mkdir()
+        (uv/'wheel').symlink_to('archive')
+        self.old(uv)
+        with self.assertRaises(ValueError):
+            self.s.tree(uv)
+        with patch.object(module.shutil,'which',return_value='/usr/local/bin/uv'), patch.object(self.s,'idle'):
+            plan = self.s.refresh_plan()
+        with patch.object(module,'command',return_value=(0,'','')), patch.object(self.s,'idle'):
+            self.assertEqual(self.s.apply(plan['id'])['status'], 'completed')
+        with self.assertRaises(ValueError):
+            self.s.tree(self.cache, uv_cache=True)
+
+    def test_uv_external_link_and_changed_tree_block(self):
+        uv = self.home/'.cache/uv'
+        uv.mkdir(parents=True)
+        link = uv/'wheel'
+        link.symlink_to(self.home)
+        with self.assertRaises(ValueError):
+            self.s.tree(uv, uv_cache=True)
+        link.unlink()
+        self.old(uv)
+        with patch.object(module.shutil,'which',return_value='/usr/local/bin/uv'), patch.object(self.s,'idle'):
+            plan = self.s.refresh_plan()
+        link.symlink_to(self.home)
+        with patch.object(module,'command') as cmd, self.assertRaises(ValueError):
+            self.s.apply(plan['id'])
+        cmd.assert_not_called()
+
+    def test_uv_managed_python_reference_is_kept_and_not_traversed(self):
+        uv = self.home/'.cache/uv'
+        bindir = uv/'builds-v0/fixture/bin'
+        bindir.mkdir(parents=True)
+        python = self.home/'.local/share/uv/python/cpython-fixture/bin/python3.12'
+        python.parent.mkdir(parents=True)
+        python.write_text('retained runtime')
+        link = bindir/'python3'
+        link.symlink_to(python)
+        tree = self.s.tree(uv,uv_cache=True)
+        self.assertEqual(tree['count'],5)  # root, builds, fixture, bin, link
+        self.assertEqual(python.read_text(),'retained runtime')
+        with self.assertRaises(ValueError):
+            self.s.tree(uv)
+        python.rename(python.with_name('secret'))
+        with self.assertRaises(ValueError):
+            self.s.tree(uv,uv_cache=True)
+
+    def test_uv_framework_python_link_does_not_touch_external_target(self):
+        uv = self.home/'.cache/uv'
+        bindir = uv/'archive-v0/fixture/bin'
+        bindir.mkdir(parents=True)
+        link = bindir/'python3'
+        link.symlink_to('/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12')
+        # No fixture writes outside the temporary home. Only metadata existence
+        # is mocked for an interpreter that may not be installed on CI.
+        with patch.object(Path,'is_file',return_value=True):
+            self.assertEqual(self.s.tree(uv,uv_cache=True)['count'],5)
+        with self.assertRaises(ValueError):
+            self.s.tree(uv)
+
+    def test_deleted_open_inodes_deduplicated_and_shared_owners(self):
+        record = 'f3\ntREG\nD0x1\ns1024\ni44\nk0\n'
+        result = module.deleted_open_files('p12\ncEditor\n'+record+record+'p13\ncPython\n'+record)
+        self.assertEqual(result['observed_bytes'], 1024)
+        self.assertEqual(result['file_count'], 1)
+        self.assertEqual([p['bytes'] for p in result['processes']], [1024,1024])
+        self.assertEqual(result['incomplete'], 0)
+        other = module.deleted_open_files('p12\ncEditor\n'+record+record.replace('D0x1','D0x2'))
+        self.assertEqual(other['observed_bytes'], 2048)
+
+    def test_deleted_open_rejects_linked_special_and_missing_size(self):
+        result = module.deleted_open_files('p12\ncEditor\nf3\ntREG\nD0x1\ni44\nk0\nf4\ntREG\nD0x1\ni45\ns200\nk1\nf5\ntCHR\nD0x1\ni46\ns300\nk0\n')
+        self.assertEqual(result['observed_bytes'], 0)
+        self.assertEqual(result['incomplete'], 1)
+        missing_links = module.deleted_open_files('p12\ncEditor\nf3\ntREG\nD0x1\ni44\ns200\n')
+        self.assertEqual(missing_links['incomplete'], 1)
+
+    def pressure_system(self, free=100, boot=1):
+        return {'free':free, 'swap_used':10, 'boot_epoch':boot}
+
+    def test_pressure_failure_is_unknown_and_does_not_claim_zero(self):
+        for reply in [(-1,'','timeout'), (1,'','permission denied')]:
+            with patch.object(self.s,'system',return_value=self.pressure_system()), patch.object(module,'command',return_value=reply):
+                result = self.s.pressure()
+            self.assertIsNone(result['deleted_open']['bytes'])
+            self.assertEqual(result['deleted_open']['status'],'unknown')
+
+    def test_pressure_no_files_reboot_comparison_and_persistence(self):
+        with patch.object(module,'command',return_value=(1,'','')) as cmd:
+            with patch.object(self.s,'system',return_value=self.pressure_system()):
+                first = self.s.pressure()
+            with patch.object(self.s,'system',return_value=self.pressure_system(500,2)):
+                second = self.s.pressure()
+        self.assertIsNone(first['free_delta'])
+        self.assertEqual(second['deleted_open']['bytes'],0)
+        self.assertEqual(second['free_delta'],400)
+        self.assertTrue(second['boot_changed'])
+        self.assertEqual(self.s.load('pressure.json',None),second)
+        self.assertEqual(len(self.s.load('pressure-history.json',[])),2)
+        self.assertEqual(cmd.call_args.args[0],['/usr/sbin/lsof','-nP','+L1','-F','pcftsiDk'])
+
+    def test_pressure_partial_retains_observation_without_total(self):
+        data='p12\ncEditor\nf3\ntREG\nD0x1\ni44\ns500\nk0\n'
+        with patch.object(self.s,'system',return_value=self.pressure_system()), patch.object(module,'command',return_value=(0,data,'permission denied')):
+            result=self.s.pressure()
+        self.assertEqual(result['deleted_open']['status'],'partial')
+        self.assertEqual(result['deleted_open']['observed_bytes'],500)
+        self.assertIsNone(result['deleted_open']['bytes'])
+
     def test_browse_uses_known_ids_and_hides_secrets(self):
         (self.cache/'.env').write_text('fixture only')
         with self.assertRaises(ValueError):
@@ -270,6 +381,19 @@ class StudioTest(unittest.TestCase):
                 self.assertEqual(error.exception.code,403)
             r=urllib.request.urlopen(urllib.request.Request(url+'/api/state',headers={'X-Studio-Token':'test-token'}))
             self.assertEqual(r.status,200)
+            for asset in ('refresh.js','refresh.css'):
+                self.assertEqual(urllib.request.urlopen(url+'/'+asset).status,200)
+            for token in ('wrong','test-token'):
+                req=urllib.request.Request(url+'/api/pressure',data=b'{}',headers={'X-Studio-Token':token,'Content-Type':'application/json'})
+                with patch.object(self.s,'pressure',return_value={'at':'fixture'}) as pressure:
+                    if token=='wrong':
+                        with self.assertRaises(urllib.error.HTTPError) as error:
+                            urllib.request.urlopen(req)
+                        self.assertEqual(error.exception.code,403)
+                        pressure.assert_not_called()
+                    else:
+                        self.assertEqual(json.load(urllib.request.urlopen(req)),{'at':'fixture'})
+                        pressure.assert_called_once()
             self.assertIn("frame-ancestors 'none'",r.headers['Content-Security-Policy'])
         finally:
             server.shutdown();server.server_close();t.join()

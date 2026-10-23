@@ -30,8 +30,10 @@ the existing `devpurge -n` / archive dry-run semantics are unchanged.
    are verified both when planning and applying. The user declares that required
    editing inputs are kept: the tool cannot prove that an MP4 preserves a Premiere
    project, voice stems, source assets or all future editing capability.
-4. **Refresh:** RSS process list, swap usage, user temporary area, snapshot names,
-   actual free-space timeline. Official `uv cache prune` is available through a
+4. **Refresh:** a quick check independent of the folder scan measures free space,
+   swap, RAM, boot time, RSS and deleted files still held open by processes.
+   Before/after checks detect reboot and compare actual free space and swap.
+   Official `uv cache prune` is available through a
    separate explicit review. It is permanent, not Trash/restore; reclaimed bytes
    are unknown before execution. No force, no `--ci`, no network, no reboot,
    process termination, swap unlinking or snapshot thinning.
@@ -42,7 +44,7 @@ the existing `devpurge -n` / archive dry-run semantics are unchanged.
 ## Safety boundaries
 
 - Loopback IPv4 only, ephemeral token, strict Host and Origin validation, no CORS,
-  CSP, no file serving outside the three UI assets. Requests without the token
+  CSP, no file serving outside explicitly allowlisted UI assets. Requests without the token
   cannot read filesystem metadata. The URL capability is moved into sessionStorage.
 - One CLI/UI instance per state directory. An in-process lock serializes scans,
   plans, completion records, application and restoration.
@@ -50,6 +52,10 @@ the existing `devpurge -n` / archive dry-run semantics are unchanged.
   npm content cache and Homebrew downloads only. uv uses its official tool.
 - Per-path configuration exclusions, archive opt-in root, protected names,
   `.env*`, `.git`, `.devpurge-keep`, links and special files are retained.
+  Only official uv pruning permits internal cache links and `bin/python*` links
+  to uv-managed or Python.org macOS framework executables, without traversing the target. Other external
+  links and protected targets still block the plan.
+  Trash and intermediate cleanup continue to reject every link.
 - Plans expire after five minutes and are single-use. Metadata identity is checked
   again before moving. Newest nested modification must be at least 24 hours old;
   lsof must positively complete with no open files and no warnings; known active
@@ -135,3 +141,28 @@ file changes, secret/protected names, symlinks, incomplete measurement, retained
 hashes, lsof failure, uv command construction, and Host/Origin/token guards.
 Real-user scan and browser QA are separate from these tests. No real cleanup is
 performed as a test.
+
+## Quick refresh diagnosis — 2026-10-23
+
+`POST /api/pressure` performs a bounded, read-only process/volume check and saves
+`pressure.json` plus up to120 compact samples in `pressure-history.json`.
+No background job or automatic termination is installed. The display follows the
+existing accepted daily-care direction: a calm tactile check button, three clear
+measurements, and save/quit/recheck instructions with a comparison after checking.
+
+`lsof -nP +L1 -F pcftsiDk` requests metadata only: no filenames, arguments or file
+contents. Device+inode deduplication prevents counting repeated descriptors.
+Shared files appear under each owner, so per-process rows are non-additive.
+Sizes are logical and limited to the ordinary account's visibility, not guaranteed
+APFS reclamation. Warnings, incomplete fields and timeouts produce partial/unknown
+instead of a misleading zero. A zero result never proves the whole Mac is clear.
+
+No measurements can attribute a historical reboot recovery before the first
+sample. Swap is OS-managed; this feature never removes VM files or invokes purge.
+Official references: [Apple Activity Monitor memory](https://support.apple.com/en-euro/guide/activity-monitor/actmntr1004/mac)
+and [lsof documentation](https://lsof.readthedocs.io/en/latest/manpage/).
+uv cache links (including build-environment references to retained managed/framework Python)
+are supported while retaining stale-plan,24-hour recency, process
+activity and exclusion guards. Running package managers may legitimately block
+refresh. Never use force to work around this. Centralized environments inside the
+cache may be recreated; working project environments and models are not targets.
