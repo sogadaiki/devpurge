@@ -239,7 +239,7 @@ and [AppKit window-close lifecycle](https://developer.apple.com/documentation/ap
 ## Quick refresh diagnosis — 2026-10-23
 
 `POST /api/pressure` performs a bounded, read-only process/volume check and saves
-`pressure.json` plus up to120 compact samples in `pressure-history.json`.
+`pressure.json` plus up to2,048 compact samples in `pressure-history.json`.
 No background job or automatic termination is installed. The display follows the
 existing accepted daily-care direction: a calm tactile check button, three clear
 measurements, and save/quit/recheck instructions with a comparison after checking.
