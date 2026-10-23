@@ -15,6 +15,7 @@ final class StudioApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     private var generation = 0
     private var ready = false
     private var quitting = false
+    private let refresh = NativeRefresh()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let id = Bundle.main.bundleIdentifier,
@@ -27,6 +28,7 @@ final class StudioApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         buildMenu()
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.userContentController.addScriptMessageHandler(refresh, contentWorld: .page, name: "refresh")
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = false
@@ -69,6 +71,7 @@ final class StudioApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         window.subtitle = "このMacで、小さなお手入れ。"
         window.minSize = NSSize(width: 850, height: 640)
         window.contentView = content
+        refresh.window = window
         window.isReleasedWhenClosed = false
         window.center()
         window.setFrameAutosaveName("StudioWindow")
@@ -114,6 +117,7 @@ final class StudioApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         let attempt = generation
         ready = false
         endpoint = nil
+        refresh.endpoint = nil
         webView.isHidden = true
         loading.isHidden = false
         retry.isHidden = true
@@ -204,6 +208,7 @@ final class StudioApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
                     return
                 }
                 self.endpoint = url
+                self.refresh.endpoint = url
                 self.webView.load(URLRequest(url: url))
             }
         }.resume()
@@ -249,7 +254,7 @@ final class StudioApp: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     @objc private func showGuide() {
         let alert = NSAlert()
         alert.messageText = "毎日、ひとつだけ整える。"
-        alert.informativeText = "① 普段は「今日のお手入れ」\nスキャンして、増えたものを一つ確認。残す判断でも完了です。\n\n② 急に容量が減ったら「リフレッシュ」\n今の状態を測る → 作業を保存して該当アプリを終了 → もう一度測る。\n\n③ 制作が終わったら「制作を完了する」\n完成品と再編集の素材を先に残し、中間物を確認します。\n\nゴミ箱への移動だけでは空き容量は増えません。復元は「整理と復元の履歴」から。アプリを閉じても記録は残ります。"
+        alert.informativeText = "① 普段は「今日のお手入れ」\nスキャンして、増えたものを一つ確認。残す判断でも完了です。\n\n② 急に容量が減ったら「リフレッシュ」\nいまの膨らみをチェック → 使い終えたアプリを開いて保存 →「ひと休み」。終了と容量変化を実測します。開発・AIアプリは保持します。\n「見守り」はアプリを開いている間、約5分ごとに記録します。\n\n③ 制作が終わったら「制作を完了する」\n完成品と再編集の素材を先に残し、中間物を確認します。\n\nゴミ箱への移動だけでは空き容量は増えません。復元は「整理と復元の履歴」から。アプリを閉じても記録は残ります。"
         alert.runModal()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -272,8 +277,13 @@ final class NoRedirects: NSObject, URLSessionTaskDelegate {
     }
 }
 
-let app = NSApplication.shared
-let delegate = StudioApp()
-app.setActivationPolicy(.regular)
-app.delegate = delegate
-app.run()
+@main
+enum StudioMain {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = StudioApp()
+        app.setActivationPolicy(.regular)
+        app.delegate = delegate
+        app.run()
+    }
+}

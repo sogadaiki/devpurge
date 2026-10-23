@@ -290,6 +290,54 @@ class StudioTest(unittest.TestCase):
     def pressure_system(self, free=100, boot=1):
         return {'free':free, 'swap_used':10, 'boot_epoch':boot}
 
+    def test_swap_used_and_reserved_are_distinct_and_unknown_is_not_zero(self):
+        self.assertEqual(module.swap_values('total = 12288.00M used = 8192.50M'),
+                         {'swap_used': 8590458880, 'swap_reserved': 12884901888})
+        self.assertEqual(module.swap_values('total = 12G used = 0M')['swap_used'], 0)
+        self.assertIsNone(module.swap_values('unavailable')['swap_reserved'])
+        self.assertIsNone(module.swap_values('total = 12G used = 8G', 1)['swap_used'])
+
+    def test_python_role_uses_executable_metadata_without_opening_files(self):
+        self.assertEqual(module.process_label('/user/.local/share/audio-studio-mcp/.venv/bin/python'), 'Audio Studio（音生成） / Python')
+        self.assertEqual(module.process_label('/work/fixture/.venv/bin/python3.12'), 'fixture / Python')
+        self.assertEqual(module.process_label('/Library/Frameworks/Python.framework/Versions/3.12/bin/python3'), 'python3')
+        self.assertEqual(module.process_label('next-server (v16)'), 'next-server (v16)')
+
+    def test_pressure_comparison_does_not_double_count_swap_or_attribute_other_changes(self):
+        before = {'free':100, 'boot_epoch':1, 'swap_used':20, 'swap_reserved':30, 'vm_volume_bytes':32, 'deleted_open_bytes':10}
+        after = {'free':95, 'boot_epoch':1, 'swap_used':10, 'swap_reserved':15, 'vm_volume_bytes':16, 'deleted_open_bytes':None}
+        result = module.pressure_change(before, after)
+        self.assertEqual(result['free_delta'], -5)
+        self.assertEqual(result['vm_volume_bytes_decrease'], 16)
+        self.assertIsNone(result['deleted_open_bytes_decrease'])
+        self.assertNotIn('reclaimed', result)
+        after['boot_epoch'] = 2
+        self.assertTrue(module.pressure_change(before, after)['reboot'])
+
+    def test_pressure_history_is_bounded_and_retains_new_gauges(self):
+        module.atomic_json(self.s.state/'pressure-history.json', [dict(self.pressure_system(), at='before')]*2048)
+        sample = dict(self.pressure_system(), vm_volume_bytes=32, swap_reserved=30, processes=[{'pid':12,'name':'fixture','footprint':7}])
+        with patch.object(self.s,'system',return_value=sample), patch.object(module,'command',return_value=(1,'','')):
+            self.s.pressure()
+        history=self.s.load('pressure-history.json', [])
+        self.assertEqual(len(history),2048)
+        self.assertEqual(history[-1]['vm_volume_bytes'],32)
+        self.assertEqual(history[-1]['top_memory'][0]['footprint'],7)
+
+    def test_temporary_probe_keeps_partial_permission_result_unknown(self):
+        results=[(0,'/private/var/folders/fixture/T/\n',''), (1,'4096 /fixture\n','denied'), (0,'1024 /private/tmp\n','')]
+        with patch.object(module,'command',side_effect=results): result=module.temporary_storage()
+        self.assertIsNone(result['bytes'])
+        self.assertEqual(result['regions'][0]['observed_bytes'],4096*1024)
+        self.assertEqual(result['regions'][0]['status'],'partial')
+        self.assertEqual(result['regions'][1]['bytes'],1024*1024)
+
+    def test_temporary_probe_rejects_unexpected_root(self):
+        with patch.object(module,'command',side_effect=[(0,'/Users/person/Documents',''),(0,'1024 /private/tmp','')]) as cmd:
+            result=module.temporary_storage()
+        self.assertEqual(len(cmd.call_args_list),2)
+        self.assertIsNone(result['bytes'])
+
     def test_pressure_failure_is_unknown_and_does_not_claim_zero(self):
         for reply in [(-1,'','timeout'), (1,'','permission denied')]:
             with patch.object(self.s,'system',return_value=self.pressure_system()), patch.object(module,'command',return_value=reply):

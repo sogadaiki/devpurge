@@ -36,8 +36,8 @@ def build(app, root, python):
     shutil.copy2(root / 'lib/studio.py', engine / 'lib/studio.py')
     shutil.copytree(root / 'ui', engine / 'ui')
     info = {'CFBundleName': 'devpurge Studio', 'CFBundleDisplayName': 'devpurge Studio',
-            'CFBundleIdentifier': BUNDLE_ID, 'CFBundleVersion': '2',
-            'CFBundleShortVersionString': '0.9.0', 'CFBundleExecutable': 'studio',
+            'CFBundleIdentifier': BUNDLE_ID, 'CFBundleVersion': '3',
+            'CFBundleShortVersionString': '0.10.0', 'CFBundleExecutable': 'studio',
             'CFBundlePackageType': 'APPL', 'LSMinimumSystemVersion': '12.0',
             'CFBundleIconFile': 'engine/ui/assets/companion.png',
             'NSHighResolutionCapable': True, 'NSPrincipalClass': 'NSApplication',
@@ -51,7 +51,7 @@ def build(app, root, python):
                     '-target', architecture + '-apple-macosx12.0',
                     '-module-cache-path', str(app.parent / 'module-cache'),
                     '-framework', 'Cocoa', '-framework', 'WebKit',
-                    str(root / 'native/StudioApp.swift'), '-o', str(macos / 'studio')],
+                    '-o', str(macos / 'studio'), *map(str, sorted((root / 'native').glob('*.swift')))],
                    check=True)
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)], check=True)
     subprocess.run(['/usr/bin/codesign', '--verify', '--strict', str(app)], check=True)
