@@ -500,6 +500,31 @@ class Studio:
         folder = self.state / 'receipts'
         return [json.loads(p.read_text()) for p in sorted(folder.glob('studio-*.json'), reverse=True)][:50]
 
+    def final_suggestions(self):
+        root = self.home / 'Desktop/01_完成品'
+        queue = deque([(root, 0)])
+        files = []
+        count = 0
+        extensions = {'.mp4', '.mov', '.webm', '.pdf', '.pptx', '.docx', '.xlsx', '.png', '.jpg', '.wav', '.mp3', '.prproj'}
+        while queue and count < 1000 and len(files) < 100:
+            folder, depth = queue.popleft()
+            if folder.is_symlink() or self.blocked(folder):
+                continue
+            try:
+                for p in sorted(folder.iterdir()):
+                    count += 1
+                    if count > 1000 or len(files) >= 100:
+                        break
+                    if p.is_symlink() or self.blocked(p):
+                        continue
+                    if p.is_dir() and depth < 3:
+                        queue.append((p, depth + 1))
+                    elif p.is_file() and p.suffix.lower() in extensions:
+                        files.append({'path': str(p), 'name': str(p.relative_to(root))})
+            except OSError:
+                continue
+        return files
+
     def reveal(self, id_):
         result = self.result or self.load('latest.json', {})
         item = self.browsed.get(id_) or next((i for i in result.get('items', []) + result.get('landscape', []) if i['id'] == id_), None)
@@ -604,7 +629,7 @@ def handler(studio, token):
                 return self.send(403, {'error': '起動時のURLから開いてください'})
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
-                return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh})
+                return self.send(200, {'progress': studio.progress, 'result': studio.result or studio.load('latest.json', None), 'history': studio.load('history.json', []), 'receipts': studio.receipts(), 'completions': studio.load('completions.json', []), 'refresh': refresh, 'finals': studio.final_suggestions()})
             return self.send(404, {'error': '見つかりません'})
 
         def do_POST(self):
