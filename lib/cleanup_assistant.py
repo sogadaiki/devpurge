@@ -194,6 +194,7 @@ class Assistant:
                 rows = []
                 for item in self.quarantine.entries():
                     items[item['path']]={**item,'action':'quarantine'}
+                s.progress['total']=len(items)
                 for item in items.values():
                     if item.get('kind')=='quarantine':s.progress['message']='隔離記録と保持元を照合しています：'+item['qid']
                     row = {k: item.get(k) for k in ('id', 'path', 'title', 'category', 'bytes', 'delta', 'reason','kind','original','qid','review_after')}
@@ -241,6 +242,13 @@ class Assistant:
                 s.progress.update(running=False, message='整理案の確認が完了しました')
 
     def plan(self, ids):
+        self.studio.progress.update(running=True, message='削除候補と保持元を再確認しています', done=0, total=len(ids) if isinstance(ids,list) else 0)
+        try:
+            return self._plan(ids)
+        finally:
+            self.studio.progress.update(running=False)
+
+    def _plan(self, ids):
         if not isinstance(ids, list) or not ids or len(ids) > 20000 or any(not isinstance(x, str) for x in ids) or len(set(ids)) != len(ids):
             raise ValueError('有効な候補を重複なく確認してください')
         report = care.load(self.state / 'report.json', {})
@@ -254,6 +262,7 @@ class Assistant:
             row = rows.get(id_)
             if not row or not row['ready']:
                 raise ValueError('対象が変化した、使用中、または削除許可がないため保持')
+            self.studio.progress['message']='保持元を再確認：'+row['title']
             if row.get('kind')=='render-copy':
                 current = render_items.get(id_,{})
                 if current.get('status')!='verified' or current.get('proof')!=row['proof']['render']['proof']:
@@ -261,6 +270,7 @@ class Assistant:
             elif self.local_check(row) != row['proof']:
                 raise ValueError('対象が変化したため保持')
             entries.append(row)
+            self.studio.progress['done']=len(entries)
         plan = {'id': secrets.token_hex(16), 'at': time.time(), 'entries': entries,
                 'bytes': sum(x['proof']['tree']['bytes'] for x in entries), 'permanent': True, 'renders':renders}
         care.save(self.state / 'plan.json', plan)
@@ -339,10 +349,16 @@ class Assistant:
         care.save(self.state / 'report.json', report)
         return receipt
 
-    def status(self):
-        report = care.load(self.state / 'report.json', {'rows':[]})
-        report['rows'] = [{k:v for k,v in x.items() if k != 'proof'} for x in report['rows']]
+    def activity(self):
+        """Cheap polling: never rescan quarantine, audits or project folders."""
         operation = care.load(self.state/'operation.json', {})
         if operation.get('running') and operation.get('owner') != self.studio.assistant_owner:
             operation = {**operation, 'running':False, 'error':'前回の確認は中断されました。AIで片付けるを押して再確認できます。'}
-        return {'report':report, 'receipt':care.load(self.state/'receipt.json', {}), 'operation':operation}
+        disk=shutil.disk_usage(self.studio.home)
+        return {'operation':operation,'progress':dict(self.studio.progress),
+                'disk':{'free':disk.free,'total':disk.total,'used':disk.used}}
+
+    def status(self):
+        report = care.load(self.state / 'report.json', {'rows':[]})
+        report['rows'] = [{k:v for k,v in x.items() if k != 'proof'} for x in report['rows']]
+        return {'report':report, 'receipt':care.load(self.state/'receipt.json', {}), **self.activity()}

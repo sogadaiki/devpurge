@@ -53,6 +53,9 @@ jobs:
       - name: Verify refresh UI state and recording timer
         run: node test/test_refresh_ui.js
 
+      - name: Verify assistant confirmation and expiry
+        run: node test/test_assistant_ui.js
+
       - name: Compile and verify native Mac application
         run: python3 scripts/install-studio-app.py --output "$RUNNER_TEMP/devpurge Studio.app"
 

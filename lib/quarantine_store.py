@@ -110,7 +110,9 @@ class Quarantine:
             for base,dirs,files,fd in os.fwalk('.',dir_fd=rootfd,follow_symlinks=False,onerror=fail):
                 if packages and base=='.':dirs[:]=[d for d in dirs if d not in ('.cache','.mf')]
                 for name in sorted(dirs+files):
-                    p=path/base/name;rel=str(p.relative_to(path));st=os.stat(name,dir_fd=fd,follow_symlinks=False)
+                    # fwalk is rooted at the pinned descriptor; base is already
+                    # relative. Avoid rebuilding/scanning absolute parents.
+                    rel=str(Path(base)/name);p=path/rel;st=os.stat(name,dir_fd=fd,follow_symlinks=False)
                     if self.s.blocked(p) or name.lower() in ('id_rsa','id_ed25519','credentials','export_credentials.cfg') or name.lower().endswith(('.pem','.key','.p12','.pfx')):
                         raise ValueError('保護・機密ファイルを含むため保持')
                     if len(rows)>250000 or time.monotonic()-start>120:raise ValueError('隔離物の検証上限のため保持')

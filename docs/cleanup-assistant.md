@@ -1,5 +1,8 @@
 # AI cleanup assistant
 
+Studio 0.18 adds lightweight live progress, current free capacity, searchable
+held items and a compact confirmation with expiry; see [studio-polish.md](studio-polish.md).
+
 Project quarantine lifecycle is implemented for supported audited Next outputs
 and identical dependency copies; see [quarantine-disposal-design.md](quarantine-disposal-design.md).
 Legacy quarantine expiry is now report-only. The assistant includes verified
@@ -9,7 +12,7 @@ The app starts at **AIで片付ける**. The manual workflow is:
 
 1. Press **AIで片付ける** once. Scan, local verification, AI selection and
    preparation of the exact deletion plan proceed automatically.
-2. Review the final paths, measured sizes and effects; choose **この内容で完全削除する**
+2. Expand the final paths, measured sizes and effects; choose **完全削除する**
    or **今回は削除しない**. No checkbox selection or model choice is required.
 3. After the user's final deletion action, see actual free-space change.
 
@@ -29,7 +32,7 @@ Trash/restore workflows remain available elsewhere for reviewable intermediates.
   existing retained-original proofs, partial-copy handling and activity checks.
 - The additional scan descends up to nine levels through development projects,
   Codex worktrees and each project's hidden Claude/`.worktrees` container. It
-  stops at 20,000 visited entries or 20 seconds and reports incomplete coverage.
+  stops at 20,000 visited entries or 120 seconds and reports incomplete coverage.
   Session/configuration stores are not traversed. Measurements use four workers.
 - Known application download/display caches are individually allowlisted;
   related running apps block removal. No blanket `Library/Caches` deletion.
