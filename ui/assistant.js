@@ -1,4 +1,5 @@
 'use strict';
+const assistantStyles=document.createElement('link');assistantStyles.rel='stylesheet';assistantStyles.href='/assistant.css';document.head.append(assistantStyles);
 const assistantNav=document.createElement('button');
 assistantNav.textContent='✧ AIで片付ける';assistantNav.dataset.view='assistant';
 document.querySelector('nav').prepend(assistantNav);

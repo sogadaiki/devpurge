@@ -117,6 +117,10 @@ class CleanupAssistantTests(unittest.TestCase):
         self.prepare()
         with self.assertRaises(ValueError):self.a.plan(['invented'])
 
+    def test_reboot_interrupted_operation_can_be_retried(self):
+        ai.care.save(self.a.state/'operation.json',{'running':True,'owner':'old-engine'})
+        self.assertFalse(self.a.status()['operation']['running'])
+
     def test_render_copy_plan_preserves_existing_proof_boundary(self):
         render={'id':'render','name':'remotion-webpack-bundle-fixture','status':'verified','proof':{'reclaimable_bytes':4096,'keepers':['retained']},'reclaimable_bytes':4096}
         row={'id':'render','kind':'render-copy','path':'/fixture/render','title':render['name'],'ready':True,'proof':{'tree':{'bytes':4096},'render':render}}

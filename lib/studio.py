@@ -219,6 +219,7 @@ class Studio:
         self.progress = {'running': False, 'message': 'まだスキャンしていません', 'done': 0, 'total': 0}
         self.plans = {}
         self.browsed = {}
+        self.assistant_owner = secrets.token_hex(16)
         self.protected = list(PROTECTED)
         self.excluded = [self.home / 'Desktop/development/sadame']
         rc = self.home / '.devpurgerc'
@@ -905,6 +906,7 @@ def handler(studio, token):
             assets.update({'/refresh.js': ('refresh.js', 'text/javascript'), '/refresh.css': ('refresh.css', 'text/css')})
             assets['/care.js'] = ('care.js', 'text/javascript')
             assets['/assistant.js'] = ('assistant.js', 'text/javascript')
+            assets['/assistant.css'] = ('assistant.css', 'text/css')
             if path in assets:
                 name, kind = assets[path]
                 return self.send(200, (ROOT / 'ui' / name).read_bytes(), kind)
@@ -950,7 +952,7 @@ def handler(studio, token):
                         operation = assistant.lock()
                         operation.__enter__()
                         try:
-                            job_recovery.care.save(assistant.state / 'operation.json', {'running':True,'at':time.time()})
+                            job_recovery.care.save(assistant.state / 'operation.json', {'running':True,'at':time.time(),'owner':studio.assistant_owner})
                         except Exception:
                             operation.__exit__(*sys.exc_info())
                             raise

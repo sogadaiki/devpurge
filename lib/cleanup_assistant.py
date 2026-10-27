@@ -86,6 +86,7 @@ class Assistant:
         previous = care.load(self.state / 'report.json', {'rows':[]})
         for row in previous.get('rows', []):
             row['ready'] = False
+        previous['review'] = {'status':'pending','runs':[]}
         care.save(self.state / 'report.json', previous)
         care.save(self.state / 'plan.json', {})
         scan = self.studio.scan()
@@ -256,5 +257,7 @@ class Assistant:
     def status(self):
         report = care.load(self.state / 'report.json', {'rows':[]})
         report['rows'] = [{k:v for k,v in x.items() if k != 'proof'} for x in report['rows']]
-        return {'report':report, 'receipt':care.load(self.state/'receipt.json', {}),
-                'operation':care.load(self.state/'operation.json', {})}
+        operation = care.load(self.state/'operation.json', {})
+        if operation.get('running') and operation.get('owner') != self.studio.assistant_owner:
+            operation = {**operation, 'running':False, 'error':'前回の確認は中断されました。AIで片付けるを押して再確認できます。'}
+        return {'report':report, 'receipt':care.load(self.state/'receipt.json', {}), 'operation':operation}
