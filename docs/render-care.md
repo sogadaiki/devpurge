@@ -5,6 +5,9 @@ measures actual free-space change, and records growth. Studio's **レンダリ�
 片付け** uses the same engine. It permanently deletes verified copies rather
 than moving them to Trash. Original files and differing versions remain.
 
+The same view provides [manual ended-job recovery](job-recovery.md) for
+disconnected Remotion browsers. Browser recovery is separate from file deletion.
+
 ## Configure and use
 
 ```sh

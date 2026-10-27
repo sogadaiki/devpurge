@@ -30,6 +30,8 @@ import webbrowser
 import importlib.util
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'lib'))
+import job_recovery
 
 
 def render_care_module():
@@ -910,6 +912,8 @@ def handler(studio, token):
                 return self.send(200, {'app': 'devpurge-studio', 'protocol': 1, 'closing': self.server.closing.is_set()})
             if path == '/api/render-care':
                 return self.send(200, care_state(studio.home))
+            if path == '/api/job-recovery':
+                return self.send(200, job_recovery.Recovery(studio.home).status())
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
                 result = studio.result or studio.load('latest.json', None)
@@ -930,6 +934,21 @@ def handler(studio, token):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('JSONオブジェクトが必要です')
+                if self.path == '/api/job-recovery':
+                    if studio.progress['running'] or not studio.lock.acquire(blocking=False):
+                        raise ValueError('別の処理が完了してから実行してください')
+                    try:
+                        recovery = job_recovery.Recovery(studio.home)
+                        with recovery.lock():
+                            if data.get('action') == 'scan':
+                                recovery.scan()
+                            elif data.get('action') == 'apply':
+                                recovery.apply(data.get('ticket'))
+                            else:
+                                raise ValueError('不明な操作です')
+                        return self.send(200, recovery.status())
+                    finally:
+                        studio.lock.release()
                 if self.path == '/api/render-care':
                     if studio.progress['running'] or not studio.lock.acquire(blocking=False):
                         raise ValueError('別の処理が完了してから実行してください')
@@ -992,7 +1011,7 @@ def handler(studio, token):
                 if self.path == '/api/restore':
                     return self.send(200, studio.restore(data.get('id', '')))
                 return self.send(404, {'error': '見つかりません'})
-            except (ValueError, OSError, KeyError, TypeError) as e:
+            except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError) as e:
                 return self.send(400, {'error': str(e)})
     return Handler
 
