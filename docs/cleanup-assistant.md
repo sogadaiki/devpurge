@@ -37,7 +37,7 @@ Trash/restore workflows remain available elsewhere for reviewable intermediates.
   output and no active Godot/project. Imported assets remain review-only.
 - Large project, application, Downloads and document totals remain visible as
   retained inventory. Parent/child totals overlap and are not added together.
-  The UI distinguishes measured locations from the maximum 80 AI-reviewed rows.
+  The UI distinguishes measured locations from successfully AI-reviewed rows.
 - Ended-browser recovery and memory/swap diagnosis remain separate advanced
   screens. The one-button workflow does not close user processes.
 
@@ -71,8 +71,14 @@ sandbox and structured output; global instructions can still load. Model output
 is data, never executable code. It cannot add paths or override local holds.
 Included usage and credits follow account policy; purchase settings are unchanged.
 
-All locally eligible candidates plus the largest retained rows, up to 80, receive
-AI review. Unreviewed rows remain held. The first model's keep decision is never
+Every discovered row receives AI review in requests of at most 80 rows, with
+locally eligible candidates first. This is a request size, not a total limit.
+Progress shows the current range and total. Failed batches do not skip subsequent
+batches; any failure holds all deletion candidates. Per-batch coverage is saved
+in `review-progress.json`; `ai_locations` counts successful primary reviews only.
+Unreviewed rows remain held. Unknown activity is sent as unknown, not as an
+assertion that the data is active. Local holds cannot be overridden by a model.
+The first model's keep decision is never
 overridden; proposed cleanup/review receives the second check. Failed review
 invalidates eligibility. Starting a new scan invalidates old proposals/plans.
 

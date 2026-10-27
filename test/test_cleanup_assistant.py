@@ -34,8 +34,43 @@ class CleanupAssistantTests(unittest.TestCase):
         return {'model':'fixture','decisions':[{'id':'cache','decision':decision,'reason':'fixture'}]}
 
     def prepare(self):
-        with patch.object(self.s,'scan',return_value=self.scan),patch.object(ai.care,'model_review',return_value=self.review()):
+        def decide(rows,*args,**kwargs):
+            return {'model':'fixture','decisions':[{'id':x['id'],'decision':'cleanup','reason':'fixture'} for x in rows]}
+        with patch.object(self.s,'scan',return_value=self.scan),patch.object(ai.care,'model_review',side_effect=decide):
             return self.a.prepare()
+
+    def test_all_841_rows_are_reviewed_in_bounded_batches(self):
+        rows=[dict(id=str(n),category='other',bytes=n,local_verified=False) for n in range(841)]
+        seen=[]
+        def decide(facts,*args,**kwargs):
+            self.assertLessEqual(len(facts),80)
+            seen.extend(x['id'] for x in facts)
+            return {'model':'fixture','decisions':[dict(id=x['id'],decision='cleanup',reason='model cannot override hold') for x in facts]}
+        with patch.object(ai.care,'model_review',side_effect=decide):r=self.a.review_all(rows,'sol','terra')
+        self.assertEqual(len(seen),841);self.assertEqual(len(set(seen)),841)
+        self.assertEqual(r['completed'],841);self.assertEqual(len(r['batches']),11)
+        self.assertTrue(all(x['ai_reviewed'] and not x['ready'] for x in rows))
+
+    def test_late_batch_failure_keeps_candidates_and_continues_coverage(self):
+        rows=[dict(id=str(n),category='cache',bytes=n,local_verified=n==0) for n in range(161)]
+        calls=[]
+        def decide(facts,model,*args,**kwargs):
+            calls.append((model,[x['id'] for x in facts]))
+            if model=='sol' and len(calls)==3:raise ValueError('middle batch failed')
+            return {'model':model,'decisions':[dict(id=x['id'],decision='cleanup',reason='fixture') for x in facts]}
+        with patch.object(ai.care,'model_review',side_effect=decide):r=self.a.review_all(rows,'sol','terra')
+        self.assertEqual([x['status'] for x in r['batches']],['reviewed','unavailable','reviewed'])
+        self.assertEqual(r['completed'],81);self.assertEqual(r['status'],'unavailable')
+        self.assertTrue(all(not x['ready'] for x in rows))
+        self.assertEqual(len(calls),4)
+
+    def test_confirmation_can_include_more_than_one_batch(self):
+        rows=[dict(id=str(n),path=str(self.cache),title='fixture',ready=True,
+                   proof={'tree':{'bytes':1}}) for n in range(81)]
+        ai.care.save(self.a.state/'report.json',{'at':time.time(),'review':{'status':'reviewed'},'rows':rows})
+        with patch.object(self.a,'local_check',return_value={'tree':{'bytes':1}}):
+            result=self.a.plan([x['id'] for x in rows])
+        self.assertEqual(len(result['entries']),81)
 
     def plan(self):
         self.prepare()
