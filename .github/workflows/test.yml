@@ -35,6 +35,9 @@ jobs:
       - name: Verify ended job recovery guards
         run: python3 test/test_job_recovery.py
 
+      - name: Verify AI cleanup authority and failure guards
+        run: python3 test/test_cleanup_assistant.py
+
       - name: Verify native lifecycle and installer rollback
         run: python3 test/test_native.py
 

@@ -32,6 +32,7 @@ import importlib.util
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'lib'))
 import job_recovery
+import cleanup_assistant
 
 
 def render_care_module():
@@ -218,6 +219,7 @@ class Studio:
         self.progress = {'running': False, 'message': 'まだスキャンしていません', 'done': 0, 'total': 0}
         self.plans = {}
         self.browsed = {}
+        self.assistant_owner = secrets.token_hex(16)
         self.protected = list(PROTECTED)
         self.excluded = [self.home / 'Desktop/development/sadame']
         rc = self.home / '.devpurgerc'
@@ -903,6 +905,8 @@ def handler(studio, token):
             assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css'), '/daily.js': ('daily.js', 'text/javascript'), '/daily.css': ('daily.css', 'text/css'), '/assets/companion.png': ('assets/companion.png', 'image/png')}
             assets.update({'/refresh.js': ('refresh.js', 'text/javascript'), '/refresh.css': ('refresh.css', 'text/css')})
             assets['/care.js'] = ('care.js', 'text/javascript')
+            assets['/assistant.js'] = ('assistant.js', 'text/javascript')
+            assets['/assistant.css'] = ('assistant.css', 'text/css')
             if path in assets:
                 name, kind = assets[path]
                 return self.send(200, (ROOT / 'ui' / name).read_bytes(), kind)
@@ -914,6 +918,8 @@ def handler(studio, token):
                 return self.send(200, care_state(studio.home))
             if path == '/api/job-recovery':
                 return self.send(200, job_recovery.Recovery(studio.home).status())
+            if path == '/api/assistant':
+                return self.send(200, cleanup_assistant.Assistant(studio).status())
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
                 result = studio.result or studio.load('latest.json', None)
@@ -934,6 +940,41 @@ def handler(studio, token):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('JSONオブジェクトが必要です')
+                if self.path == '/api/assistant':
+                    assistant = cleanup_assistant.Assistant(studio)
+                    if studio.progress['running'] or studio.lock.locked():
+                        raise ValueError('別の処理が完了してから実行してください')
+                    action = data.get('action')
+                    if action == 'prepare':
+                        primary, reviewer = data.get('primary', 'sol'), data.get('reviewer', 'terra')
+                        if primary not in job_recovery.care.MODELS or reviewer not in job_recovery.care.MODELS:
+                            raise ValueError('モデルを選択してください')
+                        operation = assistant.lock()
+                        operation.__enter__()
+                        try:
+                            job_recovery.care.save(assistant.state / 'operation.json', {'running':True,'at':time.time(),'owner':studio.assistant_owner})
+                        except Exception:
+                            operation.__exit__(*sys.exc_info())
+                            raise
+                        studio.progress['running'] = True
+                        def run_assistant():
+                            try:
+                                assistant.prepare(primary, reviewer)
+                                job_recovery.care.save(assistant.state / 'operation.json', {'running':False,'at':time.time()})
+                            except Exception as e:
+                                job_recovery.care.save(assistant.state / 'operation.json', {'running':False,'at':time.time(),'error':str(e)})
+                            finally:
+                                studio.progress['running'] = False
+                                operation.__exit__(None, None, None)
+                        self.server.scan_thread = threading.Thread(target=run_assistant)
+                        self.server.scan_thread.start()
+                        return self.send(202, {'started':True})
+                    with assistant.lock(), studio.lock:
+                        if action == 'plan':
+                            return self.send(200, assistant.plan(data.get('ids')))
+                        if action == 'apply':
+                            return self.send(200, assistant.apply(data.get('ticket')))
+                        raise ValueError('不明な操作です')
                 if self.path == '/api/job-recovery':
                     if studio.progress['running'] or not studio.lock.acquire(blocking=False):
                         raise ValueError('別の処理が完了してから実行してください')
