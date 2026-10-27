@@ -169,6 +169,7 @@ class Assistant:
                 for item in self.quarantine.entries():
                     items[item['path']]={**item,'action':'quarantine'}
                 for item in items.values():
+                    if item.get('kind')=='quarantine':s.progress['message']='隔離記録と保持元を照合しています：'+item['qid']
                     row = {k: item.get(k) for k in ('id', 'path', 'title', 'category', 'bytes', 'delta', 'reason','kind','original','qid','review_after')}
                     row.update(ready=False, local_verified=False)
                     # Only supported deletion grammars need expensive checks.

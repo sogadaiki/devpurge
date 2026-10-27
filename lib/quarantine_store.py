@@ -86,6 +86,10 @@ class Quarantine:
     def hash_file(self,path):
         self.s.physical(path)
         fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+        return self.hash_descriptor(fd)
+
+    @staticmethod
+    def hash_descriptor(fd):
         with os.fdopen(fd,'rb') as f:
             before=os.fstat(f.fileno())
             if not stat.S_ISREG(before.st_mode):raise ValueError('通常ファイル以外は保持')
@@ -99,23 +103,30 @@ class Quarantine:
     def inventory(self,path,contents=False,packages=False):
         """Compatible with local audit v1; never follow directory/file links."""
         self.s.physical(path)
-        rows=[];allocated=0;start=time.monotonic()
+        rows=[];allocated=0;allocated_ids=set();start=time.monotonic()
         def fail(error):raise error
-        for base,dirs,files in os.walk(path,followlinks=False,onerror=fail):
-            if packages and Path(base)==path:dirs[:]=[d for d in dirs if d not in ('.cache','.mf')]
-            for name in sorted(dirs+files):
-                p=Path(base)/name;rel=str(p.relative_to(path));st=p.lstat()
-                if self.s.blocked(p) or name.lower() in ('id_rsa','id_ed25519','credentials','export_credentials.cfg') or name.lower().endswith(('.pem','.key','.p12','.pfx')):
-                    raise ValueError('保護・機密ファイルを含むため保持')
-                if len(rows)>250000 or time.monotonic()-start>120:raise ValueError('隔離物の検証上限のため保持')
-                allocated+=st.st_blocks*512
-                mode=stat.S_IMODE(st.st_mode)
-                if stat.S_ISLNK(st.st_mode):
-                    if not p.resolve().is_relative_to(path):raise ValueError('隔離物の外を参照するリンクがあるため保持')
-                    rows.append([rel,'link',os.readlink(p),mode])
-                elif stat.S_ISDIR(st.st_mode):rows.append([rel,'dir',mode])
-                elif stat.S_ISREG(st.st_mode):rows.append([rel,'file',st.st_size,self.hash_file(p) if contents else st.st_mtime_ns,mode])
-                else:raise ValueError('特殊ファイルを含むため保持')
+        rootfd=self.open_directory(path)
+        try:
+            for base,dirs,files,fd in os.fwalk('.',dir_fd=rootfd,follow_symlinks=False,onerror=fail):
+                if packages and base=='.':dirs[:]=[d for d in dirs if d not in ('.cache','.mf')]
+                for name in sorted(dirs+files):
+                    p=path/base/name;rel=str(p.relative_to(path));st=os.stat(name,dir_fd=fd,follow_symlinks=False)
+                    if self.s.blocked(p) or name.lower() in ('id_rsa','id_ed25519','credentials','export_credentials.cfg') or name.lower().endswith(('.pem','.key','.p12','.pfx')):
+                        raise ValueError('保護・機密ファイルを含むため保持')
+                    if len(rows)>250000 or time.monotonic()-start>120:raise ValueError('隔離物の検証上限のため保持')
+                    inode=(st.st_dev,st.st_ino)
+                    if inode not in allocated_ids:
+                        allocated_ids.add(inode);allocated+=st.st_blocks*512
+                    mode=stat.S_IMODE(st.st_mode)
+                    if stat.S_ISLNK(st.st_mode):
+                        if not p.resolve().is_relative_to(path):raise ValueError('隔離物の外を参照するリンクがあるため保持')
+                        rows.append([rel,'link',os.readlink(name,dir_fd=fd),mode])
+                    elif stat.S_ISDIR(st.st_mode):rows.append([rel,'dir',mode])
+                    elif stat.S_ISREG(st.st_mode):
+                        digest=self.hash_descriptor(os.open(name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=fd)) if contents else st.st_mtime_ns
+                        rows.append([rel,'file',st.st_size,digest,mode])
+                    else:raise ValueError('特殊ファイルを含むため保持')
+        finally:os.close(rootfd)
         rows.sort(key=lambda x:x[0])
         return {'digest':hashlib.sha256(json.dumps(rows,ensure_ascii=False).encode()).hexdigest(),
                 'files':sum(x[1]=='file' for x in rows),'entries':len(rows),
@@ -166,6 +177,7 @@ class Quarantine:
         meta=self.catalog()['entries'].get(row['uuid'],{})
         if meta.get('review_after',0)>time.time():raise ValueError('保持期間を延長したため保持')
         folder,target=self.binding(row)
+        initial_identity=care.identity(stored)
         root=self.s.physical(Path(target.get('root',str(original.parent))))
         if not root.is_relative_to(self.s.home) or not original.is_relative_to(root):
             raise ValueError('記録した元プロジェクトの範囲が不正です')
@@ -212,7 +224,8 @@ class Quarantine:
             reconstruction='保持した同一依存環境あり。npm ciと監査記録の固有メタデータから再構築可能'
         else:raise ValueError('対応する再生成・同一コピーの証明がないため保持')
         self.idle(stored)
-        return {'kind':'quarantine','tree':{'bytes':allocated,'inventory':inventory},'identity':care.identity(stored),
+        if care.identity(stored)!=initial_identity:raise ValueError('検証中に隔離物が変化しました')
+        return {'kind':'quarantine','tree':{'bytes':allocated,'inventory':inventory},'identity':initial_identity,
                 'record':row,'audit':str(folder),'source':proof,'retained':retained,'reconstruction':reconstruction}
 
     def mark(self,row,status,**values):
