@@ -44,6 +44,9 @@ jobs:
       - name: Verify quarantine disposal and restore guards
         run: python3 test/test_quarantine_store.py
 
+      - name: Verify bounded filesystem discovery
+        run: python3 test/test_bounded_fs.py
+
       - name: Verify native lifecycle and installer rollback
         run: python3 test/test_native.py
 
