@@ -39,3 +39,7 @@ the containment change (969,723,904 bytes verified in both). This is a single
 warm-cache observation, not an end-to-end scan benchmark. Hashing all required
 files, audit matching, source retention, activity checks and final pre-delete
 revalidation remain in place. Full scans can still take minutes.
+
+Unknown quarantine provenance formats are held with an explicit unsupported-format
+reason before hashing; they are not mislabeled as changed content. New records
+without a unique source binding are also held, never inferred disposable.
