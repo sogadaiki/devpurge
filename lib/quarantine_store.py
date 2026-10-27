@@ -78,7 +78,7 @@ class Quarantine:
         stored=self.s.physical(Path(row['path']))
         if not original.is_relative_to(self.s.home) or original.is_relative_to(self.root):
             raise ValueError('元パスが対応範囲外です')
-        if stored.parent!=self.root or stored.name!=row['qid']+'-'+original.name or not stored.is_dir():
+        if stored.parent!=self.root or stored.name!=row['qid']+'-'+original.name or not (stored.is_dir() or stored.is_file()):
             raise ValueError('隔離先の所在・形式を確認できません')
         if stored.stat().st_uid!=os.getuid():raise ValueError('隔離物の所有者が異なります')
         return original,stored
@@ -141,7 +141,7 @@ class Quarantine:
             if folder.is_symlink() or not folder.is_dir():continue
             receipt=self.read_json(folder/'movement-receipt.json',[])
             if not isinstance(receipt,list):continue
-            matching=[r for r in receipt if r.get('id')==row['qid'] and r.get('stored')==row['path'] and r.get('original')==row['original'] and r.get('epoch')==row['epoch']]
+            matching=[r for r in receipt if r.get('id')==row['qid'] and r.get('stored')==row['path'] and r.get('original')==row['original'] and ('epoch' not in r or r['epoch']==row['epoch'])]
             if not matching:continue
             plan=self.read_json(folder/'execution-plan.json',{})
             targets=[x for x in plan.get('targets',[]) if x.get('path')==row['original']]
@@ -149,6 +149,97 @@ class Quarantine:
             found.append((folder,targets[0]))
         if len(found)!=1:raise ValueError('一意な監査記録と生成元を確認できないため保持')
         return found[0]
+
+    def external_records(self):
+        """Surface audit receipts not represented in the quarantine manifest.
+
+        This is visibility only: Trash and worktree deletion have separate guards.
+        No receipt can authorize an arbitrary filesystem path.
+        """
+        known={(x['qid'],x['original'],x['path']) for x in self.entries()}
+        result=[]
+        if not self.audits.exists():return result
+        for folder in sorted(self.audits.iterdir())[:500]:
+            if folder.is_symlink() or not folder.is_dir():continue
+            records=self.read_json(folder/'movement-receipt.json',[])
+            if not isinstance(records,list):continue
+            for row in records:
+                if (row.get('id'),row.get('original'),row.get('stored')) in known:continue
+                result.append({'audit':folder.name,'id':row.get('id'),'original':row.get('original'),
+                    'path':row.get('stored'),'bytes':row.get('bytes'),
+                    'reason':'隔離台帳外の記録。ゴミ箱・別の保存先のため自動削除対象にしません。'})
+        return result
+
+    def content_map(self,path):
+        """Hash-based receipt format used by other project cleanup sessions."""
+        self.s.physical(path)
+        if path.is_file():
+            st=path.stat()
+            return {'.':{'type':'file','bytes':st.st_size,'mode':stat.S_IMODE(st.st_mode),'sha256':self.hash_file(path)}},st.st_blocks*512
+        # The common inventory performs bounded, no-follow secret/link guards.
+        _,allocated=self.inventory(path)
+        result={}
+        rootfd=self.open_directory(path)
+        try:
+            for base,dirs,files,fd in os.fwalk('.',dir_fd=rootfd,follow_symlinks=False,onerror=lambda e:(_ for _ in ()).throw(e)):
+                for name in dirs+files:
+                    st=os.stat(name,dir_fd=fd,follow_symlinks=False)
+                    if stat.S_ISDIR(st.st_mode):continue
+                    if not stat.S_ISREG(st.st_mode):raise ValueError('内容形式で対応しないリンク・特殊ファイルは保持')
+                    key=str((path/base/name).relative_to(path))
+                    result[key]={'type':'file','bytes':st.st_size,'mode':stat.S_IMODE(st.st_mode),
+                        'sha256':self.hash_descriptor(os.open(name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=fd))}
+        finally:os.close(rootfd)
+        return result,allocated
+
+    def verify_contents(self,row,original,stored,folder,target,identity):
+        contents,allocated=self.content_map(stored)
+        if contents!=target.get('contents'):raise ValueError('隔離時のファイル内容と一致しないため保持')
+        kind=target.get('kind');retained={}
+        plan=self.read_json(folder/'execution-plan.json')
+        if kind=='verified_duplicate' and stored.is_file():
+            anchor=self.s.physical(Path(target.get('retained_path','')))
+            if not anchor.is_relative_to(self.s.home) or anchor.is_relative_to(self.root) or anchor.is_relative_to(self.s.home/'.Trash'):
+                raise ValueError('残す原本の場所が不正です')
+            self.s.directory(anchor.parent,1)
+            same,_=self.content_map(anchor)
+            # Mode is not content; file bytes/hash must still match current retained original.
+            if any(same['.'][k]!=contents['.'][k] for k in ('bytes','sha256')):
+                raise ValueError('残す原本と内容が一致しません')
+            retained={'path':str(anchor),'sha256':same['.']['sha256']}
+            reconstruction='同一内容の原本を保持：'+str(anchor)
+        elif kind=='regenerable_webpack_cache' and original.parts[-3:]==('node_modules','.cache','webpack'):
+            project=original.parents[2]
+            package=self.read_json(project/'package.json')
+            deps={**package.get('dependencies',{}),**package.get('devDependencies',{})}
+            if not any(x in deps for x in ('remotion','@remotion/cli','webpack')):raise ValueError('webpackの再生成元が不明なため保持')
+            retained={'package_sha256':self.hash_file(project/'package.json')}
+            reconstruction='元のRemotion/webpackプロジェクトでビルド時にキャッシュを再生成'
+        elif kind=='obsolete_generated_build' and original.name=='dist':
+            sources={p:v for p,v in plan.get('retained_sources',{}).items() if Path(p).is_relative_to(original.parent)}
+            required=[original.parent/name for name in ('package.json','package-lock.json','index.html','vite.config.ts')]
+            if not sources or any(str(p) not in sources for p in required):raise ValueError('生成元の内容証明が不足しています')
+            for name,expected in sources.items():
+                p=self.s.physical(Path(name))
+                actual,_=self.content_map(p)
+                if actual.get('.')!=expected:raise ValueError('保持した生成元が変更・消失したため保持')
+            source_hashes={x.get('sha256') for x in sources.values()}
+            for name,item in contents.items():
+                generated=name in ('index.html','404.html','bundle-analysis.html','sitemap.xml') or re.fullmatch(r'assets/(?:js|css)/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)',name)
+                if not generated and item['sha256'] not in source_hashes:
+                    raise ValueError('生成物内に保持元と一致しないファイルがあるため保持')
+            package=self.read_json(required[0]);deps={**package.get('dependencies',{}),**package.get('devDependencies',{})}
+            if 'vite' not in deps or not package.get('scripts',{}).get('build'):raise ValueError('ビルド手順を確認できません')
+            ignored=care.run(['git','-C',str(original.parent),'check-ignore','-q','--','dist/'])
+            tracked=care.run(['git','-C',str(original.parent),'ls-files','--','dist'])
+            if ignored.returncode or tracked.returncode or tracked.stdout.strip() or tracked.stderr:raise ValueError('生成物のGit除外を確認できません')
+            retained={'sources_digest':hashlib.sha256(json.dumps(sources,sort_keys=True).encode()).hexdigest()}
+            reconstruction='保持したfrontendで npm ci → npm run build（設定済みの環境が必要）'
+        else:raise ValueError('この監査形式は一覧のみ対応。原本・Git worktree・不明な生成物は保持')
+        self.idle(stored)
+        if care.identity(stored)!=identity:raise ValueError('検証中に隔離物が変化しました')
+        return {'kind':'quarantine','tree':{'bytes':allocated,'contents_digest':hashlib.sha256(json.dumps(contents,sort_keys=True).encode()).hexdigest()},
+                'identity':identity,'record':row,'audit':str(folder),'retained':retained,'reconstruction':reconstruction}
 
     def idle(self,path):
         # Freshly moved quarantine has new ctime. Age is not a permission gate;
@@ -181,6 +272,12 @@ class Quarantine:
         if meta.get('review_after',0)>time.time():raise ValueError('保持期間を延長したため保持')
         folder,target=self.binding(row)
         initial_identity=care.identity(stored)
+        if 'contents' in target:
+            audit_plan=self.read_json(folder/'execution-plan.json')
+            root=self.s.physical(Path(target.get('root',target.get('repo',audit_plan.get('root',str(original.parent))))))
+            if not root.is_relative_to(self.s.home) or not original.is_relative_to(root):raise ValueError('元プロジェクトの範囲が不正です')
+            self.references(root,stored)
+            return self.verify_contents(row,original,stored,folder,target,initial_identity)
         root=self.s.physical(Path(target.get('root',str(original.parent))))
         if not root.is_relative_to(self.s.home) or not original.is_relative_to(root):
             raise ValueError('記録した元プロジェクトの範囲が不正です')

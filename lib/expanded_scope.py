@@ -58,7 +58,7 @@ def discover(studio):
     q=deque((p,0) for p in roots(studio.home)); seen=set(); result=[]
     start=time.monotonic(); count=0; limited=False
     while q:
-        if count>=20000 or time.monotonic()-start>20:
+        if count>=20000 or time.monotonic()-start>120:
             limited=True;break
         root,depth=q.popleft()
         if root in seen or studio.blocked(root) or root.is_symlink():continue

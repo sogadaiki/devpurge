@@ -64,6 +64,20 @@ final class NativeRefresh: NSObject, WKScriptMessageHandlerWithReply {
             replyHandler(nil, "この画面からは操作できません"); return
         }
         let reply: ([String: Any]) -> Void = { replyHandler($0, nil) }
+        if (message.body as? [String: Any])?["action"] as? String == "folder-access" {
+            let panel = NSOpenPanel()
+            panel.title = "作業データを照合する場所を選択"
+            panel.message = "デスクトップを選択して読み取りを許可します。この操作ではデータを削除しません。"
+            panel.prompt = "読み取りを許可"
+            panel.canChooseFiles = false; panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
+            guard let window else { replyHandler(nil, "アプリの画面を開いてください"); return }
+            panel.beginSheetModal(for: window) { result in
+                reply(["granted": result == .OK])
+            }
+            return
+        }
         do {
             switch data["action"] {
             case "list":

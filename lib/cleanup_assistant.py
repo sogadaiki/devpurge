@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import stat
 import subprocess
 import time
 import render_care as care
@@ -15,11 +16,11 @@ import quarantine_store
 import concurrent.futures
 
 POLICY = ('You help organize disk storage. Do not use any tools or inspect files. '
+          'Each id represents all locations with identical local safety facts, not a sample. '
           'Only classify the supplied metadata. Return exactly one decision per id, with a concise Japanese reason. '
           'cleanup is permitted only when local_verified=true, regenerable=true, active=false. '
           'Otherwise keep; review if uncertain. Never suggest deleting original media, histories, '
           'models or environments. Do not produce commands. Large bytes alone never justify deletion.')
-BATCH_SIZE = 80
 
 
 class Assistant:
@@ -95,35 +96,49 @@ class Assistant:
 
     def review_all(self, rows, primary, reviewer):
         """Review every row in bounded requests; no partial-run deletion authority."""
-        ordered=sorted(rows,key=lambda x:(not x['local_verified'],-(x['bytes'] or 0)))
+        # Identical safety facts share one decision, not one sampled file.
+        # Every row remains mapped to exactly one group; size never grants authority.
+        groups={}
+        for row in rows:
+            key=(row['category'],row['local_verified'],(row.get('proof') or {}).get('kind',row.get('kind','unverified')))
+            groups.setdefault(key,[]).append(row)
+        members={};ordered=[]
+        for index,(key,items) in enumerate(groups.items()):
+            group=dict(items[0],id='g'+str(index),bytes=sum(x['bytes'] or 0 for x in items),count=len(items))
+            members[group['id']]=items;ordered.append(group)
+        ordered.sort(key=lambda x:(not x['local_verified'],-x['bytes']))
         review={'runs':[],'status':'not-needed','completed':0,'total':len(rows),'batches':[]}
+        review['groups']=len(ordered)
         for row in rows:
             row.update(ready=False,ai_reviewed=False)
-        for offset in range(0,len(ordered),BATCH_SIZE):
-            batch=ordered[offset:offset+BATCH_SIZE]
+        for offset in range(0,len(ordered),12):
+            batch=ordered[offset:offset+12]
             facts=[{'id':x['id'],'category':x['category'],'bytes':x['bytes'],
+                    'locations':x['count'],
                     'growth_bytes':x.get('delta'),'local_verified':x['local_verified'],
                     'regenerable':x['local_verified'],'active':False if x['local_verified'] else None,
                     'verified_kind':(x.get('proof') or {}).get('kind',x.get('kind','unverified'))} for x in batch]
             record={'offset':offset,'count':len(batch),'status':'pending'}
             review['batches'].append(record)
-            self.studio.progress.update(message='Codexが全件を確認中：%s〜%s / %sか所' % (offset+1,offset+len(batch),len(rows)),done=offset,total=len(rows))
+            self.studio.progress.update(message='Codexが全件を確認中：同じ検証条件をまとめて判定（%sか所）' % len(rows),done=review['completed'],total=len(rows))
             try:
-                first=care.model_review(facts,primary,self.state,policy=POLICY)
+                first=self.review_request(facts,primary)
                 decisions={x['id']:x for x in first['decisions']}
                 review['runs'].append(first['model'])
-                for row in batch:
-                    row.update(ai_reviewed=True,ai_reason=decisions[row['id']]['reason'])
-                review['completed']+=len(batch)
+                for group in batch:
+                    for row in members[group['id']]:
+                        row.update(ai_reviewed=True,ai_reason=decisions[group['id']]['reason'])
+                review['completed']+=sum(x['count'] for x in batch)
                 second_facts=[x for x in facts if x['local_verified'] and decisions[x['id']]['decision'] in ('cleanup','review')]
                 if second_facts:
                     self.studio.progress['message']='別のモデルで削除候補を再確認しています（全件調査を継続中）'
-                    second=care.model_review(second_facts,reviewer,self.state,policy=POLICY)
+                    second=self.review_request(second_facts,reviewer)
                     decisions.update({x['id']:x for x in second['decisions']})
                     review['runs'].append(second['model'])
-                for row in batch:
-                    row['ai_reason']=decisions[row['id']]['reason']
-                    row['ready']=row['local_verified'] and decisions[row['id']]['decision']=='cleanup'
+                for group in batch:
+                    for row in members[group['id']]:
+                        row['ai_reason']=decisions[group['id']]['reason']
+                        row['ready']=row['local_verified'] and decisions[group['id']]['decision']=='cleanup'
                 record['status']='reviewed'
             except (ValueError,OSError,subprocess.SubprocessError) as e:
                 record.update(status='unavailable',error=str(e))
@@ -136,6 +151,15 @@ class Assistant:
         elif rows:
             review['status']='reviewed'
         return review
+
+    def review_request(self,facts,model):
+        for attempt in range(2):
+            try:return care.model_review(facts,model,self.state,policy=POLICY)
+            except (subprocess.TimeoutExpired,ValueError) as e:
+                retryable=isinstance(e,(subprocess.TimeoutExpired,json.JSONDecodeError)) or 'IDs' in str(e) or 'Invalid model' in str(e)
+                if not retryable:raise
+                if attempt:raise ValueError('AIの応答を再試行しても検証できなかったため保持') from e
+                self.studio.progress['message']='AIの応答を再試行しています。削除は行いません。'
 
     def prepare(self, primary='sol', reviewer='terra'):
         if primary not in care.MODELS or reviewer not in care.MODELS:
@@ -276,7 +300,8 @@ class Assistant:
                     entry['status'] = 'deleting'
                     care.save(path, receipt)
                     if row.get('kind')=='quarantine':self.quarantine.mark(row['proof']['record'],'deleting')
-                    shutil.rmtree(p.name, dir_fd=fd)
+                    if row.get('kind')=='quarantine' and stat.S_ISREG(st.st_mode):os.unlink(p.name,dir_fd=fd)
+                    else:shutil.rmtree(p.name, dir_fd=fd)
                 finally:
                     os.close(fd)
                 entry.update(status='removed', bytes=row['proof']['tree']['bytes'])

@@ -469,7 +469,7 @@ def model_review(rows, model, state, runner=run, policy=None):
         'decisions': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
             'required': ['id', 'decision', 'reason'], 'properties': {
                 'id': {'type': 'string'}, 'decision': {'type': 'string', 'enum': ['cleanup', 'keep', 'review']},
-                'reason': {'type': 'string'}}}}}}
+                'reason': {'type': 'string','maxLength':120}}}}}}
     executable = shutil.which('codex')
     if not executable:
         raise ValueError('Codex CLI unavailable; keeping candidates')
@@ -499,8 +499,9 @@ def model_review(rows, model, state, runner=run, policy=None):
             p = runner([executable, 'exec', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check',
                         '-C', str(directory), '-s', 'read-only', '-m', resolved_model,
                         '-c', 'model_reasoning_effort="low"',
+                        '-c', 'project_doc_max_bytes=0',
                         '-c', 'forced_login_method="chatgpt"',
-                        '--output-schema', str(directory / 'schema.json'), '-o', str(directory / 'answer.json'), prompt], timeout=180)
+                        '--output-schema', str(directory / 'schema.json'), '-o', str(directory / 'answer.json'), prompt], timeout=90)
             if p.returncode == 0:
                 break
             error = p.stderr.lower()

@@ -294,7 +294,7 @@ class Studio:
         started=time.monotonic()
         queue = deque([(base, 0)])
         while queue and count < 6000:
-            if time.monotonic()-started>30:
+            if time.monotonic()-started>120:
                 limited=True;break
             root, depth = queue.popleft()
             if depth > 4 or self.blocked(root) or root.is_symlink():
@@ -681,7 +681,7 @@ class Studio:
     def idle(self, path, newest):
         if time.time() - newest < 86400:
             raise ValueError('24時間以内に変更があります。今は保持します')
-        code, out, err = command(['/usr/sbin/lsof', '-nP', '+D', str(path)], timeout=20)
+        code, out, err = command(['/usr/sbin/lsof', '-nP']+(['+D',str(path)] if path.is_dir() else ['--',str(path)]), timeout=20)
         if code != 1 or out.strip() or err.strip():
             raise ValueError('使用中、または使用状態を確実に確認できません。関連アプリを終了して再確認してください')
         # lsof misses future accesses by installers; block known package managers as well.
@@ -935,7 +935,9 @@ def handler(studio, token):
             if path == '/api/assistant':
                 return self.send(200, cleanup_assistant.Assistant(studio).status())
             if path == '/api/quarantine':
-                try:return self.send(200, {'items':cleanup_assistant.Assistant(studio).quarantine.entries()})
+                try:
+                    q=cleanup_assistant.Assistant(studio).quarantine
+                    return self.send(200, {'items':q.entries(),'external':q.external_records()})
                 except (ValueError,OSError) as e:return self.send(400,{'error':str(e)})
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]

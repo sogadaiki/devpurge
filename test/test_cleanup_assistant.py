@@ -31,7 +31,7 @@ class CleanupAssistantTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def review(self, decision='cleanup'):
-        return {'model':'fixture','decisions':[{'id':'cache','decision':decision,'reason':'fixture'}]}
+        return {'model':'fixture','decisions':[{'id':'g0','decision':decision,'reason':'fixture'}]}
 
     def prepare(self):
         def decide(rows,*args,**kwargs):
@@ -41,18 +41,19 @@ class CleanupAssistantTests(unittest.TestCase):
 
     def test_all_841_rows_are_reviewed_in_bounded_batches(self):
         rows=[dict(id=str(n),category='other',bytes=n,local_verified=False) for n in range(841)]
-        seen=[]
+        seen=[];covered=[]
         def decide(facts,*args,**kwargs):
             self.assertLessEqual(len(facts),80)
             seen.extend(x['id'] for x in facts)
+            covered.extend(x['locations'] for x in facts)
             return {'model':'fixture','decisions':[dict(id=x['id'],decision='cleanup',reason='model cannot override hold') for x in facts]}
         with patch.object(ai.care,'model_review',side_effect=decide):r=self.a.review_all(rows,'sol','terra')
-        self.assertEqual(len(seen),841);self.assertEqual(len(set(seen)),841)
-        self.assertEqual(r['completed'],841);self.assertEqual(len(r['batches']),11)
+        self.assertEqual(sum(covered),841);self.assertEqual(len(seen),1)
+        self.assertEqual(r['completed'],841);self.assertEqual(len(r['batches']),1)
         self.assertTrue(all(x['ai_reviewed'] and not x['ready'] for x in rows))
 
     def test_late_batch_failure_keeps_candidates_and_continues_coverage(self):
-        rows=[dict(id=str(n),category='cache',bytes=n,local_verified=n==0) for n in range(161)]
+        rows=[dict(id=str(n),category='category'+str(n),bytes=n,local_verified=n==0) for n in range(25)]
         calls=[]
         def decide(facts,model,*args,**kwargs):
             calls.append((model,[x['id'] for x in facts]))
@@ -60,7 +61,7 @@ class CleanupAssistantTests(unittest.TestCase):
             return {'model':model,'decisions':[dict(id=x['id'],decision='cleanup',reason='fixture') for x in facts]}
         with patch.object(ai.care,'model_review',side_effect=decide):r=self.a.review_all(rows,'sol','terra')
         self.assertEqual([x['status'] for x in r['batches']],['reviewed','unavailable','reviewed'])
-        self.assertEqual(r['completed'],81);self.assertEqual(r['status'],'unavailable')
+        self.assertEqual(r['completed'],13);self.assertEqual(r['status'],'unavailable')
         self.assertTrue(all(not x['ready'] for x in rows))
         self.assertEqual(len(calls),4)
 
@@ -71,6 +72,20 @@ class CleanupAssistantTests(unittest.TestCase):
         with patch.object(self.a,'local_check',return_value={'tree':{'bytes':1}}):
             result=self.a.plan([x['id'] for x in rows])
         self.assertEqual(len(result['entries']),81)
+
+    def test_timeout_retries_once_with_same_coverage(self):
+        rows=[dict(id='one',category='cache',bytes=10,local_verified=True)]
+        with patch.object(ai.care,'model_review',side_effect=[subprocess.TimeoutExpired('fixture',90),self.review(),self.review()]) as model:
+            result=self.a.review_all(rows,'sol','terra')
+        self.assertEqual(model.call_count,3);self.assertEqual(result['completed'],1)
+        self.assertTrue(rows[0]['ready'])
+
+    def test_different_verification_facts_never_share_permission(self):
+        rows=[dict(id='verified',category='cache',bytes=1,local_verified=True),dict(id='unknown',category='cache',bytes=999,local_verified=False)]
+        def decide(facts,*args,**kwargs):
+            return {'model':'fixture','decisions':[dict(id=x['id'],decision='cleanup',reason='fixture') for x in facts]}
+        with patch.object(ai.care,'model_review',side_effect=decide):self.a.review_all(rows,'sol','terra')
+        self.assertTrue(rows[0]['ready']);self.assertFalse(rows[1]['ready'])
 
     def plan(self):
         self.prepare()
