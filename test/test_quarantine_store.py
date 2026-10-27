@@ -40,6 +40,13 @@ class QuarantineTests(unittest.TestCase):
     def test_verified_build_is_not_deleted_by_inspection(self):
         self.assertEqual(self.q.verify(self.row)['kind'],'quarantine');self.assertTrue(self.stored.exists())
 
+    def test_unknown_provenance_format_is_not_reported_as_content_mismatch(self):
+        self.target={'path':str(self.original),'contents':{'.':{'size':12,'sha256':'unknown'}}}
+        qs.care.save(self.folder/'execution-plan.json',{'targets':[self.target]})
+        with patch.object(self.q,'content_map',side_effect=AssertionError('unsupported records need no content read')):
+            with self.assertRaisesRegex(ValueError,'検証形式に未対応'):self.q.verify(self.row)
+        self.assertTrue(self.stored.exists())
+
     def duplicate_file(self):
         self.original=self.project/'old.mp4';self.stored=self.q.root/'Q101-old.mp4'
         self.stored.write_bytes(b'same retained media');self.anchor=self.project/'primary.mp4';self.anchor.write_bytes(self.stored.read_bytes())

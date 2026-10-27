@@ -195,9 +195,12 @@ class Quarantine:
         return result,allocated
 
     def verify_contents(self,row,original,stored,folder,target,identity):
+        kind=target.get('kind')
+        if kind not in ('verified_duplicate','regenerable_webpack_cache','obsolete_generated_build'):
+            raise ValueError('隔離記録の再生成・保持元の検証形式に未対応のため保持')
         contents,allocated=self.content_map(stored)
         if contents!=target.get('contents'):raise ValueError('隔離時のファイル内容と一致しないため保持')
-        kind=target.get('kind');retained={}
+        retained={}
         plan=self.read_json(folder/'execution-plan.json')
         if kind=='verified_duplicate' and stored.is_file():
             anchor=self.s.physical(Path(target.get('retained_path','')))
