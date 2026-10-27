@@ -27,8 +27,28 @@ import time
 import unicodedata
 import urllib.parse
 import webbrowser
+import importlib.util
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def render_care_module():
+    spec = importlib.util.spec_from_file_location('devpurge_render_care', ROOT / 'lib/render_care.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def care_state(home):
+    root = home / 'Library/Application Support/devpurge/render-care'
+    def read(name, default):
+        p = root / name
+        return json.loads(p.read_text()) if p.is_file() and not p.is_symlink() else default
+    latest = read('latest.json', {})
+    latest['items'] = [{k: v for k, v in row.items() if k != 'proof'} for row in latest.get('items', [])]
+    return {'latest': latest, 'config': read('config.json', {}), 'review': read('review.json', {}),
+            'receipt': read('last-receipt.json', {}), 'operation': read('operation.json', {}),
+            'history': read('history.json', [])[-144:]}
 PROTECTED = ['証拠', '裁判', '訴訟', '別訴', '告訴', '準備書面', '判決', '弁護士', '法務', '原本', '契約書']
 GENERATED = {'node_modules': 'dependencies', '.next': 'build', '.open-next': 'build', '.venv': 'python', 'venv': 'python', '__pycache__': 'build'}
 INTERMEDIATE = {'renders', 'render', 'tmp', 'temp', 'intermediates', 'proxy', 'proxies', 'exports', 'output', 'outputs'}
@@ -879,6 +899,7 @@ def handler(studio, token):
             path = urllib.parse.urlsplit(self.path).path
             assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css'), '/daily.js': ('daily.js', 'text/javascript'), '/daily.css': ('daily.css', 'text/css'), '/assets/companion.png': ('assets/companion.png', 'image/png')}
             assets.update({'/refresh.js': ('refresh.js', 'text/javascript'), '/refresh.css': ('refresh.css', 'text/css')})
+            assets['/care.js'] = ('care.js', 'text/javascript')
             if path in assets:
                 name, kind = assets[path]
                 return self.send(200, (ROOT / 'ui' / name).read_bytes(), kind)
@@ -886,6 +907,8 @@ def handler(studio, token):
                 return self.send(403, {'error': '起動時のURLから開いてください'})
             if path == '/api/health':
                 return self.send(200, {'app': 'devpurge-studio', 'protocol': 1, 'closing': self.server.closing.is_set()})
+            if path == '/api/render-care':
+                return self.send(200, care_state(studio.home))
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
                 result = studio.result or studio.load('latest.json', None)
@@ -906,6 +929,33 @@ def handler(studio, token):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('JSONオブジェクトが必要です')
+                if self.path == '/api/render-care':
+                    if studio.progress['running'] or not studio.lock.acquire(blocking=False):
+                        raise ValueError('別の処理が完了してから実行してください')
+                    try:
+                        module = render_care_module()
+                        care = module.Care(state=studio.home / 'Library/Application Support/devpurge/render-care')
+                        if not care.config()['sources']:
+                            raise ValueError('保持するRemotionプロジェクトの登録が必要です')
+                        apply = data.get('apply') is True
+                        studio.progress = {'running': True, 'message': '一時データと元素材を照合しています', 'done': 0, 'total': 0}
+                        module.save(care.state / 'operation.json', {'running': True, 'at': time.time()})
+                    except Exception:
+                        studio.lock.release()
+                        raise
+                    def run_care():
+                        try:
+                            result = care.cycle(apply=apply)
+                            error = result.get('ai', {}).get('error')
+                            module.save(care.state / 'operation.json', {'running': False, 'at': time.time(), 'error': error})
+                        except Exception as e:
+                            module.save(care.state / 'operation.json', {'running': False, 'at': time.time(), 'error': str(e)})
+                        finally:
+                            studio.progress = {'running': False, 'message': 'レンダリングの片付けを確認しました', 'done': 0, 'total': 0}
+                            studio.lock.release()
+                    self.server.scan_thread = threading.Thread(target=run_care)
+                    self.server.scan_thread.start()
+                    return self.send(202, {'started': True})
                 if self.path == '/api/scan':
                     if studio.progress['running'] or studio.lock.locked():
                         raise ValueError('処理中です')

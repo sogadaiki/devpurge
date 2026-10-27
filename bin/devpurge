@@ -16,6 +16,11 @@ while [[ -L "$DEVPURGE_SCRIPT" ]]; do
 done
 DEVPURGE_DIR="$(cd "$(dirname "$DEVPURGE_SCRIPT")/.." && pwd)"
 
+if [[ "${1:-}" == "render-care" ]]; then
+  shift
+  exec python3 "${DEVPURGE_DIR}/lib/render_care.py" "$@"
+fi
+
 # Studio has its own read-only scanner and reviewed, recoverable actions.
 if [[ "${1:-}" == "studio" || "${1:-}" == "diagnose" ]]; then
   DEVPURGE_STUDIO_COMMAND="$1"
@@ -82,6 +87,9 @@ USAGE
   devpurge [OPTIONS]
   devpurge studio                     Open the local storage dashboard
   devpurge diagnose                   Read-only storage diagnosis as JSON
+  devpurge render-care scan           Measure Remotion temp growth (no deletion)
+  devpurge render-care review         Verify retained originals and ask Codex
+  devpurge render-care apply          Reclaim verified copies permanently
   devpurge quarantine <path> [reason]   Move a path into quarantine (30d grace)
   devpurge quarantine --list            Show quarantined items
   devpurge quarantine --restore <ID>    Restore an item to its original path
