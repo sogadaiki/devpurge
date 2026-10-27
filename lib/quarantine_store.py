@@ -10,6 +10,7 @@ import stat
 import time
 import uuid
 import render_care as care
+import quarantine_adapters as adapters
 
 
 class Quarantine:
@@ -141,12 +142,11 @@ class Quarantine:
         if len(folders)>500:raise ValueError('監査記録の探索上限です')
         for folder in folders:
             if folder.is_symlink() or not folder.is_dir():continue
-            receipt=self.read_json(folder/'movement-receipt.json',[])
-            if not isinstance(receipt,list):continue
-            matching=[r for r in receipt if r.get('id')==row['qid'] and r.get('stored')==row['path'] and r.get('original')==row['original'] and ('epoch' not in r or r['epoch']==row['epoch'])]
+            receipt=adapters.receipts(self,folder)
+            matching=[r for r in receipt if r.get('id')==row['qid'] and r.get('stored')==row['path'] and r.get('original')==row['original'] and ('epoch' not in r or str(r['epoch'])==str(row['epoch']))]
             if not matching:continue
             plan=self.read_json(folder/'execution-plan.json',{})
-            targets=[x for x in plan.get('targets',[]) if x.get('path')==row['original']]
+            targets=adapters.targets(plan,row)
             if len(matching)!=1 or len(targets)!=1:raise ValueError('監査記録が重複・不足しています')
             found.append((folder,targets[0]))
         if len(found)!=1:raise ValueError('一意な監査記録と生成元を確認できないため保持')
@@ -159,12 +159,13 @@ class Quarantine:
         No receipt can authorize an arbitrary filesystem path.
         """
         known={(x['qid'],x['original'],x['path']) for x in self.entries()}
+        # Completed audited deletions remain history, not newly unbound debt.
+        known.update((x.get('qid'),x.get('original'),x.get('path')) for x in self.catalog()['entries'].values() if x.get('status')=='deleted')
         result=[]
         if not self.audits.exists():return result
         for folder in sorted(self.audits.iterdir())[:500]:
             if folder.is_symlink() or not folder.is_dir():continue
-            records=self.read_json(folder/'movement-receipt.json',[])
-            if not isinstance(records,list):continue
+            records=adapters.receipts(self,folder)
             for row in records:
                 if (row.get('id'),row.get('original'),row.get('stored')) in known:continue
                 result.append({'audit':folder.name,'id':row.get('id'),'original':row.get('original'),
@@ -276,7 +277,12 @@ class Quarantine:
         meta=self.catalog()['entries'].get(row['uuid'],{})
         if meta.get('review_after',0)>time.time():raise ValueError('保持期間を延長したため保持')
         folder,target=self.binding(row)
+        if (stored/'.git').exists() or (stored/'.git').is_symlink():
+            raise ValueError('Git作業コピーは専用のGit検証・削除が必要なため保持（通常の完全削除には含めません）')
         initial_identity=care.identity(stored)
+        if target.get('adapter'):
+            self.references(original.parent,stored)
+            return adapters.verify(self,row,original,stored,folder,target,initial_identity)
         if 'contents' in target:
             audit_plan=self.read_json(folder/'execution-plan.json')
             root=self.s.physical(Path(target.get('root',target.get('repo',audit_plan.get('root',str(original.parent))))))
