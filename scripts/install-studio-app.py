@@ -34,10 +34,11 @@ def build(app, root, python):
     engine = resources / 'engine'
     (engine / 'lib').mkdir(parents=True)
     shutil.copy2(root / 'lib/studio.py', engine / 'lib/studio.py')
+    shutil.copy2(root / 'lib/render_care.py', engine / 'lib/render_care.py')
     shutil.copytree(root / 'ui', engine / 'ui')
     info = {'CFBundleName': 'devpurge Studio', 'CFBundleDisplayName': 'devpurge Studio',
             'CFBundleIdentifier': BUNDLE_ID, 'CFBundleVersion': '3',
-            'CFBundleShortVersionString': '0.10.0', 'CFBundleExecutable': 'studio',
+            'CFBundleShortVersionString': '0.11.0', 'CFBundleExecutable': 'studio',
             'CFBundlePackageType': 'APPL', 'LSMinimumSystemVersion': '12.0',
             'CFBundleIconFile': 'engine/ui/assets/companion.png',
             'NSHighResolutionCapable': True, 'NSPrincipalClass': 'NSApplication',

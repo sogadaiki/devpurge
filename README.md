@@ -2,6 +2,11 @@
 
 ## Storage Studio
 
+**Render care:** Studio's 「レンダリングの片付け」 and `devpurge render-care`
+reclaim identical Remotion temporary copies after original-file and activity
+checks, with Codex classification and actual free-space readback. Optional
+ten-minute care requires explicit setup. See [render care](docs/render-care.md).
+
 Open **devpurge Studio.app** for a dedicated Mac window, daily care, diagnosis
 and recovery. Build/install locally with `python3 scripts/install-studio-app.py`
 (macOS12+, Swift toolchain and Python3.9+). The app lives in `~/Applications/`,

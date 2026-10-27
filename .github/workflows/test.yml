@@ -29,6 +29,9 @@ jobs:
       - name: Verify Storage Studio safety and local API
         run: python3 test/test_studio.py
 
+      - name: Verify render cleanup and Codex failure guards
+        run: python3 test/test_render_care.py
+
       - name: Verify native lifecycle and installer rollback
         run: python3 test/test_native.py
 
