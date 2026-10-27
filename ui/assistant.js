@@ -22,6 +22,13 @@ async function loadQuarantineHistory(){
  const q=await api('quarantine');document.querySelector('#quarantine-history')?.remove();
  const panel=document.createElement('div');panel.id='quarantine-history';panel.innerHTML=quarantineHTML(q.items);$('#history').prepend(panel);bindQuarantine(panel,loadQuarantineHistory);
 }
+const renderHistoryWithoutQuarantine=renderHistory;
+renderHistory=()=>{
+ const panel=document.querySelector('#quarantine-history');
+ renderHistoryWithoutQuarantine();
+ if(panel)$('#history').prepend(panel);
+ else loadQuarantineHistory().catch(e=>notice(e.message,true));
+};
 document.addEventListener('click',e=>{if(e.target.closest('button')?.dataset.view==='history')act(loadQuarantineHistory);});
 assistantNav.onclick=()=>{setView('assistant');$('#page-title').textContent='AIで片付ける';$('#subtitle').textContent='調査と判断はAIに。最後の完全削除は、あなたに。';loadAssistant();};
 async function loadAssistant(){
@@ -46,7 +53,11 @@ async function loadAssistant(){
   if(op.running)assistantTimer=setTimeout(loadAssistant,2000);
   else if(assistantAwaitingReview&&currentView==='assistant'){
    assistantAwaitingReview=false;
-   if(eligible.length)showAssistantPlan(await api('assistant',{action:'plan',ids:eligible.map(x=>x.id)}));
+   if(eligible.length){
+    const button=$('#assistant-start');button.disabled=true;button.textContent='削除内容と保持元を最終確認しています…';
+    try{showAssistantPlan(await api('assistant',{action:'plan',ids:eligible.map(x=>x.id)}));}
+    finally{button.disabled=false;button.textContent='AIで片付ける';}
+   }
   }
  }catch(e){assistantAwaitingReview=false;notice(e.message,true);}
 }
