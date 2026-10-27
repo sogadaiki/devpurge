@@ -128,7 +128,9 @@ def inspect_bundle(path, public, cache, blocked=protected):
     physical(path)
     physical(public)
     records, keepers, unmatched, copies, allocated = [], [], [], [], 0
-    for base, dirs, files in os.walk(path, followlinks=False):
+    def unreadable(error):
+        raise error
+    for base, dirs, files in os.walk(path, followlinks=False, onerror=unreadable):
         dirs.sort()
         for name in sorted(dirs + files):
             p = Path(base) / name
@@ -339,10 +341,13 @@ class Care:
             if row['status'] != 'verified':
                 row['reason'] = '; '.join(errors[:3]) or 'No retained source configured'
         now = time.time()
+        total = sum(x['bytes'] or 0 for x in items)
         result = {'at': now, 'free': shutil.disk_usage(self.temp).free, 'items': items,
-                  'renderers': observed['renderers'], 'temp_bytes': sum(x['bytes'] or 0 for x in items),
+                  'renderers': observed['renderers'],
+                  'temp_bytes': total if all(x['bytes'] is not None for x in items) else None,
+                  'observed_temp_bytes': total,
                   'scope': 'Remotion top-level temp directories only; overlapping totals are not added'}
-        result['growth_bytes'] = result['temp_bytes'] - before['temp_bytes'] if 'temp_bytes' in before else None
+        result['growth_bytes'] = result['temp_bytes'] - before['temp_bytes'] if result['temp_bytes'] is not None and before.get('temp_bytes') is not None else None
         result['alert'] = result['free'] < 50 * 2**30 or (result['growth_bytes'] or 0) >= 10 * 2**30
         save(self.state / 'latest.json', result)
         history = load(self.state / 'history.json', [])

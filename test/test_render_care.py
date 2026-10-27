@@ -168,6 +168,20 @@ class Guards(unittest.TestCase):
                 with self.engine.locked():
                     self.fail('concurrent cleanup acquired lock')
 
+    def test_incomplete_measurement_is_not_zero(self):
+        with patch.object(care, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'permission denied')):
+            scan = self.engine.scan()
+            self.assertIsNone(scan['temp_bytes'])
+            self.assertIsNone(scan['growth_bytes'])
+
+    def test_unreadable_tree_is_not_verified(self):
+        def bad_walk(path, followlinks, onerror):
+            onerror(PermissionError('unreadable'))
+            return iter([])
+        with patch.object(care.os, 'walk', side_effect=bad_walk):
+            with self.assertRaises(PermissionError):
+                care.inspect_bundle(self.bundle, self.source / 'public', {})
+
 
 if __name__ == '__main__':
     unittest.main()
