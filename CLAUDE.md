@@ -19,7 +19,7 @@ macOS向けキャッシュ削除CLIツール。
 - `lib/scan.sh` — スキャン（静的 + node_modules/.next動的 + misc/Electron/Containerキャッシュ自動検出 + review）
 - `lib/worktree.sh` — stale git worktree検出（merged/squash-merged/未マージだがorigin退避済み + clean + idle + 一点物なし→削除可、それ以外→review報告のみ。squashはgit cherryのpatch同値で判定。削除前に復元用TSVをApp Support/devpurge/logs/へ）
 - `lib/branches.sh` — マージ済みブランチ削除（git branch -dのみ、SHA復元ログをApp Support/devpurge/logs/へ）
-- `lib/quarantine.sh` — 隔離（mv+manifest、30日猶予、restore可）+ 保護パターン（証拠/裁判/訴訟等は絶対不可侵。rc protect=で追加）
+- `lib/quarantine.sh` — 隔離（mv+manifest、30日は再確認目安、restore可）。期限切れ処理は報告のみ。`lib/quarantine_store.py` は監査照合・保持元再検証・アプリ復元/延長、assistantの本人確認後にだけ完全削除。CLIとアプリは共通 `.operation-lock` を使用。保護パターンは継続。
 - `lib/archive.sh` / `lib/archive.py` — 明示指定したアーカイブのファイル単位の期限管理。初回登録から10日以上、最終観測利用から10日以上で削除。通常キャッシュ/重複走査はこの領域を除外する
 - `lib/dupes.sh` — 内容同一ファイル検出（SHA-256、名前不問、先頭末尾1MBの予備指紋で全ハッシュを最小化）+ 明示的バージョン違い検出（-v2/_final/(1)/ 2/のコピー。素の_1/_2は分割・連番なので対象外）+ Spotlight未使用日レポート
 - `lib/cleanup.sh` — 削除（ホワイトリスト + rm guard + review拒否 + worktreeはgit経由 + --trash対応）

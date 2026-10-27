@@ -920,6 +920,9 @@ def handler(studio, token):
                 return self.send(200, job_recovery.Recovery(studio.home).status())
             if path == '/api/assistant':
                 return self.send(200, cleanup_assistant.Assistant(studio).status())
+            if path == '/api/quarantine':
+                try:return self.send(200, {'items':cleanup_assistant.Assistant(studio).quarantine.entries()})
+                except (ValueError,OSError) as e:return self.send(400,{'error':str(e)})
             if path == '/api/state':
                 refresh = [json.loads(p.read_text()) for p in sorted((studio.state / 'refresh').glob('refresh-*.json'), reverse=True)][:30]
                 result = studio.result or studio.load('latest.json', None)
@@ -940,6 +943,13 @@ def handler(studio, token):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('JSONオブジェクトが必要です')
+                if self.path == '/api/quarantine':
+                    assistant=cleanup_assistant.Assistant(studio)
+                    if studio.progress['running'] or studio.lock.locked():raise ValueError('別の処理が完了してから実行してください')
+                    with assistant.lock(),studio.lock:
+                        if data.get('action')=='restore':return self.send(200,assistant.quarantine.restore(data.get('id')))
+                        if data.get('action')=='hold':return self.send(200,assistant.quarantine.hold(data.get('id')))
+                        raise ValueError('不明な隔離操作です')
                 if self.path == '/api/assistant':
                     assistant = cleanup_assistant.Assistant(studio)
                     if studio.progress['running'] or studio.lock.locked():

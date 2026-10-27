@@ -182,7 +182,7 @@ devpurge quarantine --list                                # see what's held
 devpurge quarantine --restore Q003                        # full undo
 ```
 
-Nothing judged by heuristics or AI goes straight to deletion. Quarantined items are held for 30 days (`quarantine_days=N`) with a manifest, restorable to their exact original path, and only expire on a later cleanup run. Refuses protected patterns.
+Quarantined items retain their manifest and can be restored until the user confirms permanent deletion in Studio. `quarantine_days=N` (default 30) is a review reminder, not an automatic deletion deadline; even `quarantine --expire` only reports. Studio revalidates supported project audit proofs and includes verified copies in **AIで片付ける**. Unknown, changed, protected or active data stays held. See [project quarantine](docs/quarantine-disposal-design.md).
 
 ### Branch (v0.5.0)
 
