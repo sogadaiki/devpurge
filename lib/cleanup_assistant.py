@@ -18,6 +18,7 @@ POLICY = ('You help organize disk storage. Do not use any tools or inspect files
           'cleanup is permitted only when local_verified=true, regenerable=true, active=false. '
           'Otherwise keep; review if uncertain. Never suggest deleting original media, histories, '
           'models or environments. Do not produce commands. Large bytes alone never justify deletion.')
+BATCH_SIZE = 80
 
 
 class Assistant:
@@ -85,6 +86,50 @@ class Assistant:
         with engine.locked():
             return engine.scan(verify=True)
 
+    def review_all(self, rows, primary, reviewer):
+        """Review every row in bounded requests; no partial-run deletion authority."""
+        ordered=sorted(rows,key=lambda x:(not x['local_verified'],-(x['bytes'] or 0)))
+        review={'runs':[],'status':'not-needed','completed':0,'total':len(rows),'batches':[]}
+        for row in rows:
+            row.update(ready=False,ai_reviewed=False)
+        for offset in range(0,len(ordered),BATCH_SIZE):
+            batch=ordered[offset:offset+BATCH_SIZE]
+            facts=[{'id':x['id'],'category':x['category'],'bytes':x['bytes'],
+                    'growth_bytes':x.get('delta'),'local_verified':x['local_verified'],
+                    'regenerable':x['local_verified'],'active':False if x['local_verified'] else None,
+                    'verified_kind':(x.get('proof') or {}).get('kind',x.get('kind','unverified'))} for x in batch]
+            record={'offset':offset,'count':len(batch),'status':'pending'}
+            review['batches'].append(record)
+            self.studio.progress.update(message='Codexが全件を確認中：%s〜%s / %sか所' % (offset+1,offset+len(batch),len(rows)),done=offset,total=len(rows))
+            try:
+                first=care.model_review(facts,primary,self.state,policy=POLICY)
+                decisions={x['id']:x for x in first['decisions']}
+                review['runs'].append(first['model'])
+                for row in batch:
+                    row.update(ai_reviewed=True,ai_reason=decisions[row['id']]['reason'])
+                review['completed']+=len(batch)
+                second_facts=[x for x in facts if x['local_verified'] and decisions[x['id']]['decision'] in ('cleanup','review')]
+                if second_facts:
+                    self.studio.progress['message']='別のモデルで削除候補を再確認しています（全件調査を継続中）'
+                    second=care.model_review(second_facts,reviewer,self.state,policy=POLICY)
+                    decisions.update({x['id']:x for x in second['decisions']})
+                    review['runs'].append(second['model'])
+                for row in batch:
+                    row['ai_reason']=decisions[row['id']]['reason']
+                    row['ready']=row['local_verified'] and decisions[row['id']]['decision']=='cleanup'
+                record['status']='reviewed'
+            except (ValueError,OSError,subprocess.SubprocessError) as e:
+                record.update(status='unavailable',error=str(e))
+            # Preserve coverage evidence even if a later request or app run fails.
+            care.save(self.state/'review-progress.json',review)
+        review['runs']=list(dict.fromkeys(review['runs']))
+        if any(x['status']!='reviewed' for x in review['batches']):
+            review.update(status='unavailable',error='一部のAI確認に失敗しました。全候補を保持しました。再実行してください。')
+            for row in rows:row['ready']=False
+        elif rows:
+            review['status']='reviewed'
+        return review
+
     def prepare(self, primary='sol', reviewer='terra'):
         if primary not in care.MODELS or reviewer not in care.MODELS:
             raise ValueError('モデルを選択してください')
@@ -144,39 +189,12 @@ class Assistant:
                                          'proof':{'tree':{'bytes':item.get('reclaimable_bytes',0)}, 'render':item} if verified else None})
                 except (OSError, ValueError, subprocess.SubprocessError) as e:
                     render_error = str(e)
-                # All locally eligible candidates plus largest retained categories.
-                chosen = sorted(rows, key=lambda x: (not x['local_verified'], -(x['bytes'] or 0)))[:80]
-                facts = [{'id': x['id'], 'category': x['category'], 'bytes': x['bytes'],
-                          'growth_bytes': x['delta'], 'local_verified': x['local_verified'],
-                          'regenerable': x['local_verified'], 'active': not x['local_verified']} for x in chosen]
-                review = {'runs': [], 'status': 'not-needed'}
-                if facts:
-                    try:
-                        s.progress['message'] = 'Codexが整理案を作成しています。ファイル内容は送信しません'
-                        first = care.model_review(facts, primary, self.state, policy=POLICY)
-                        decisions = {x['id']: x for x in first['decisions']}
-                        review['runs'].append(first['model'])
-                        # Every deletion recommendation receives an independent review.
-                        second_facts = [x for x in facts if x['local_verified'] and decisions[x['id']]['decision'] in ('cleanup', 'review')]
-                        if second_facts:
-                            s.progress['message'] = '別のモデルで削除候補を再確認しています'
-                            second = care.model_review(second_facts, reviewer, self.state, policy=POLICY)
-                            decisions.update({x['id']: x for x in second['decisions']})
-                            review['runs'].append(second['model'])
-                        for row in rows:
-                            decision = decisions.get(row['id'], {})
-                            row['ai_reason'] = decision.get('reason', 'ローカル保持条件に従い保持')
-                            row['ready'] = row['local_verified'] and decision.get('decision') == 'cleanup'
-                        review['status'] = 'reviewed'
-                    except (ValueError, OSError, subprocess.SubprocessError) as e:
-                        review.update(status='unavailable', error=str(e))
-                        for row in rows:
-                            row['ready'] = False
+                review=self.review_all(rows,primary,reviewer)
                 report = {'at': time.time(), 'scan_at': scan['at'], 'free': shutil.disk_usage(s.home).free,
                           'rows': rows, 'review': review, 'primary': primary, 'reviewer': reviewer,
                           'render_error':render_error,
                           'scope': '開発フォルダ9階層、Codex/Claudeの隠しworktree内、開発ツールとアプリのキャッシュ、大容量の保存場所。原本・履歴は保持。親子の容量は重複するため合算しません。',
-                          'locations':len(rows),'ai_locations':len(facts),
+                          'locations':len(rows),'ai_locations':review['completed'],
                           'large_locations':sorted(scan.get('landscape',[]),key=lambda x:x.get('bytes') or 0,reverse=True)[:12],
                           'discovery_limited': scan['discovery_limited'] or getattr(s,'expanded_limited',False)}
                 care.save(self.state / 'report.json', report)
@@ -185,8 +203,8 @@ class Assistant:
                 s.progress.update(running=False, message='整理案の確認が完了しました')
 
     def plan(self, ids):
-        if not isinstance(ids, list) or not ids or len(ids) > 80 or any(not isinstance(x, str) for x in ids) or len(set(ids)) != len(ids):
-            raise ValueError('1〜80項目を確認してください')
+        if not isinstance(ids, list) or not ids or len(ids) > 20000 or any(not isinstance(x, str) for x in ids) or len(set(ids)) != len(ids):
+            raise ValueError('有効な候補を重複なく確認してください')
         report = care.load(self.state / 'report.json', {})
         if not 0 <= time.time() - report.get('at', 0) < 1800 or report.get('review', {}).get('status') != 'reviewed':
             raise ValueError('AI整理案を再作成してください（有効期限30分）')

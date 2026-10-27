@@ -41,7 +41,7 @@ def build(app, root, python):
     shutil.copytree(root / 'ui', engine / 'ui')
     info = {'CFBundleName': 'devpurge Studio', 'CFBundleDisplayName': 'devpurge Studio',
             'CFBundleIdentifier': BUNDLE_ID, 'CFBundleVersion': '3',
-            'CFBundleShortVersionString': '0.14.0', 'CFBundleExecutable': 'studio',
+            'CFBundleShortVersionString': '0.15.0', 'CFBundleExecutable': 'studio',
             'CFBundlePackageType': 'APPL', 'LSMinimumSystemVersion': '12.0',
             'CFBundleIconFile': 'engine/ui/assets/companion.png',
             'NSHighResolutionCapable': True, 'NSPrincipalClass': 'NSApplication',
