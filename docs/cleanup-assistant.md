@@ -1,5 +1,8 @@
 # AI cleanup assistant
 
+Studio 0.19 supports additional cross-session receipts, PCM staging audio,
+Remotion pack caches and asset aliases; see [quarantine-record-adapters.md](quarantine-record-adapters.md).
+
 Studio 0.18 adds lightweight live progress, current free capacity, searchable
 held items and a compact confirmation with expiry; see [studio-polish.md](studio-polish.md).
 

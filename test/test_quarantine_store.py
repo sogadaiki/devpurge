@@ -11,6 +11,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'lib'))
 import studio
 import quarantine_store as qs
 import cleanup_assistant
+import quarantine_adapters as qa
 
 
 class QuarantineTests(unittest.TestCase):
@@ -46,6 +47,101 @@ class QuarantineTests(unittest.TestCase):
         with patch.object(self.q,'content_map',side_effect=AssertionError('unsupported records need no content read')):
             with self.assertRaisesRegex(ValueError,'検証形式に未対応'):self.q.verify(self.row)
         self.assertTrue(self.stored.exists())
+
+    def adapter_record(self,original,stored,plan,receipt_name='movement-receipt.json'):
+        self.original=original;self.stored=stored
+        original.parent.mkdir(parents=True,exist_ok=True)
+        (self.q.root/'manifest.tsv').write_text('Q101\t%s\t%s\t4\t%s\tfixture\n'%(self.epoch,original,stored))
+        (self.folder/'movement-receipt.json').unlink(missing_ok=True)
+        receipt={'id':'Q101','epoch':str(self.epoch),'original':str(original),'stored':str(stored)}
+        qs.care.save(self.folder/receipt_name,receipt if receipt_name=='receipt.json' else [receipt])
+        qs.care.save(self.folder/'execution-plan.json',plan)
+        self.row=self.q.entries()[0]
+
+    def audio_adapter(self):
+        stored=self.q.root/'Q101-audio_processed.wav';stored.write_bytes(b'pcm fixture')
+        original=self.project/'work/audio_processed.wav'
+        self.anchor=self.project/'premiere/camera.mov';self.anchor.parent.mkdir();self.anchor.write_bytes(b'retained mov fixture')
+        target={'path':str(original),'contents':{'.':{'size':stored.stat().st_size,'sha256':self.q.hash_file(stored)}}}
+        self.adapter_record(original,stored,{'targets':[target],'retained':{str(self.anchor):{'sha256':self.q.hash_file(self.anchor)}}})
+        self.audio={'sha256':'SHA256='+'a'*64,'codec':'pcm_s24le','rate':'48000','channels':2,'streams':1}
+        qs.care.save(self.folder/'media-stream-proof.json',{'streams':{'intermediate_audio':{'path':str(original),'hash':self.audio['sha256']},'retained_premiere_audio':{'path':str(self.anchor),'hash':self.audio['sha256']}}})
+
+    def test_legacy_audio_rechecks_pcm_and_retained_file(self):
+        self.audio_adapter()
+        with patch.object(qa,'audio_fingerprint',return_value=self.audio):
+            self.assertEqual(self.q.verify(self.row)['kind'],'quarantine')
+            self.anchor.write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError,'保持元が記録時'):self.q.verify(self.row)
+
+    def test_pcm_mismatch_or_extra_staging_stream_is_held(self):
+        self.audio_adapter()
+        with patch.object(qa,'audio_fingerprint',side_effect=[self.audio,{**self.audio,'sha256':'SHA256='+'b'*64}]):
+            with self.assertRaisesRegex(ValueError,'PCM音声'):self.q.verify(self.row)
+        with patch.object(qa,'audio_fingerprint',return_value={**self.audio,'streams':2}):
+            with self.assertRaisesRegex(ValueError,'PCM音声'):self.q.verify(self.row)
+
+    def alias_adapter(self):
+        original=self.project/'assets';original.mkdir()
+        stored=self.q.root/'Q101-assets';stored.mkdir();(stored/'one.mp4').write_bytes(b'media')
+        self.anchor=self.project/'public/one.mp4';self.anchor.parent.mkdir();self.anchor.write_bytes(b'media')
+        (original/'one.mp4').symlink_to('../public/one.mp4')
+        item={'copy':str(original/'one.mp4'),'retained':str(self.anchor),'bytes':5,'mode':420,'sha256':self.q.hash_file(self.anchor)}
+        self.adapter_record(original,stored,{'proofs':[item]},'receipt.json')
+
+    def test_single_receipt_aliases_and_apply_preserve_originals(self):
+        self.alias_adapter();proof=self.q.verify(self.row)
+        self.assertEqual(self.q.external_records(),[])
+        row={**self.row,'ready':True,'proof':proof}
+        assistant=cleanup_assistant.Assistant(self.s)
+        qs.care.save(assistant.state/'report.json',{'at':time.time(),'rows':[row],'review':{'status':'reviewed'}})
+        plan=assistant.plan([row['id']]);result=assistant.apply(plan['id'])
+        self.assertEqual(result['status'],'completed');self.assertFalse(self.stored.exists())
+        self.assertEqual(self.anchor.read_bytes(),b'media')
+        self.assertEqual((self.original/'one.mp4').read_bytes(),b'media')
+        self.assertEqual(self.q.external_records(),[],'completed deletion is history, not unbound debt')
+
+    def test_alias_changed_unknown_file_and_changed_original_are_held(self):
+        self.alias_adapter();(self.stored/'unique').write_text('unique')
+        with self.assertRaisesRegex(ValueError,'記録にない'):self.q.verify(self.row)
+        (self.stored/'unique').unlink();alias=self.original/'one.mp4';alias.unlink();alias.symlink_to('../missing.mp4')
+        with self.assertRaisesRegex(ValueError,'切り替わっていない'):self.q.verify(self.row)
+        alias.unlink();alias.symlink_to('../public/one.mp4');self.anchor.write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError,'保持元が記録時'):self.q.verify(self.row)
+
+    def test_duplicate_receipt_formats_cannot_grant_authority(self):
+        self.alias_adapter()
+        qs.care.save(self.folder/'receipts.json',[self.q.read_json(self.folder/'receipt.json')])
+        with self.assertRaisesRegex(ValueError,'重複'):self.q.verify(self.row)
+
+    def test_plural_receipt_and_string_epoch_bind_but_worktrees_stay_held(self):
+        stored=self.q.root/'Q101-checkout';stored.mkdir();(stored/'.git').write_text('gitdir: retained git metadata')
+        self.adapter_record(self.project/'checkout',stored,{'targets':[{'path':str(self.project/'checkout')}]},'receipts.json')
+        self.assertEqual(self.q.binding(self.row)[0],self.folder)
+        self.assertEqual(self.q.external_records(),[])
+        with self.assertRaisesRegex(ValueError,'Git作業コピー'):self.q.verify(self.row)
+
+    def cache_adapter(self):
+        original=self.project/'old/remotion/node_modules/.cache';stored=self.q.root/'Q101-.cache'
+        cache=stored/'webpack/remotion-production-4.0.409/abc/index.pack';cache.parent.mkdir(parents=True);cache.write_bytes(b'pack')
+        source=self.project/'retained';source.mkdir();(source/'src').mkdir();(source/'src/index.ts').write_text('entry')
+        (source/'package.json').write_text(json.dumps({'dependencies':{'remotion':'4.0.409'}}));(source/'package-lock.json').write_text('{}')
+        target={'path':str(original),'contents':{'webpack/remotion-production-4.0.409/abc/index.pack':{'size':4,'sha256':self.q.hash_file(cache)}}}
+        retained={str(source/name):{'sha256':self.q.hash_file(source/name)} for name in ('package.json','package-lock.json')}
+        self.adapter_record(original,stored,{'targets':[target],'retained':retained})
+        return source
+
+    def test_legacy_pack_cache_uses_retained_checkout_and_requires_sources(self):
+        source=self.cache_adapter();self.assertEqual(self.q.verify(self.row)['kind'],'quarantine')
+        (source/'src/index.ts').unlink()
+        with self.assertRaises(OSError):self.q.verify(self.row)
+
+    def test_cache_unknown_file_and_active_quarantine_are_held(self):
+        self.cache_adapter()
+        with patch.object(self.q,'idle',side_effect=ValueError('active')):
+            with self.assertRaisesRegex(ValueError,'active'):self.q.verify(self.row)
+        (self.stored/'unique').write_bytes(b'keep')
+        with self.assertRaisesRegex(ValueError,'一致しない'):self.q.verify(self.row)
 
     def duplicate_file(self):
         self.original=self.project/'old.mp4';self.stored=self.q.root/'Q101-old.mp4'
