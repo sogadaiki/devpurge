@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'lib'))
 import job_recovery
 import cleanup_assistant
+import bounded_fs
 
 
 def render_care_module():
@@ -220,6 +221,7 @@ class Studio:
         self.plans = {}
         self.browsed = {}
         self.assistant_owner = secrets.token_hex(16)
+        self.read_errors = {}
         self.protected = list(PROTECTED)
         self.excluded = [self.home / 'Desktop/development/sadame']
         rc = self.home / '.devpurgerc'
@@ -240,6 +242,19 @@ class Studio:
         if not path.is_absolute() or path != path.resolve() or self.blocked(path):
             raise ValueError('リンク・保護対象・除外パスは操作できません')
         return path
+
+    def directory(self,path,limit=15000,dirs_only=False):
+        path=Path(path)
+        if self.blocked(path):raise OSError('保護・除外パスのため保持')
+        if any(path.is_relative_to(Path(p)) for p in self.read_errors):
+            raise OSError('既に読み取りできなかった場所のため保持')
+        try:
+            entries,limited=bounded_fs.listing(path,limit,dirs_only=dirs_only)
+            if limited:self.discovery_limited=True
+            return entries
+        except OSError as e:
+            self.read_errors[str(path)]=str(e)
+            raise
 
     def targets(self):
         # Fixed, explainable paths; no broad scan of private application data.
@@ -276,20 +291,17 @@ class Studio:
         # Bounded name-only discovery; never enter secrets, Git or generated roots.
         count = 0
         limited = False
+        started=time.monotonic()
         queue = deque([(base, 0)])
         while queue and count < 6000:
+            if time.monotonic()-started>30:
+                limited=True;break
             root, depth = queue.popleft()
             if depth > 4 or self.blocked(root) or root.is_symlink():
                 continue
             try:
-                with os.scandir(root) as iterator:
-                    entries = []
-                    for n, entry in enumerate(iterator):
-                        if n >= 15000:
-                            limited = True
-                            break
-                        if entry.is_dir(follow_symlinks=False):
-                            entries.append(Path(entry.path))
+                self.progress['message']='フォルダを確認しています：'+str(root)
+                entries = self.directory(root,dirs_only=True)
             except OSError:
                 continue
             for p in sorted(entries):
@@ -315,7 +327,7 @@ class Studio:
             # Report the whole user temp region once. Child details avoid double counting.
             found.append((temp, 'system', 'このユーザーの一時ファイル', 'Pythonの展開・ビルド残骸などを含みます。OSや実行中アプリのデータもあるため一括削除しません。', 'review'))
             self.temp = temp
-        self.discovery_limited = limited or bool(queue)
+        self.discovery_limited = limited or bool(queue) or bool(self.read_errors) or getattr(self,'discovery_limited',False)
         return found
 
     def measure(self, spec):
@@ -435,7 +447,7 @@ class Studio:
                  (self.home/'Desktop', 'デスクトップ')]
         for base, kind in bases:
             try:
-                for p in sorted(base.iterdir())[:250]:
+                for p in self.directory(base,250):
                     if p.is_symlink() or self.blocked(p) or p.name.startswith('.') or (base.name=='Desktop' and p.name=='development'):
                         continue
                     specs.append((p, 'other', p.name, kind, 'review'))
@@ -460,6 +472,8 @@ class Studio:
             raise ValueError('別のスキャンまたは整理が進行中です')
         try:
             self.progress = {'running': True, 'message': '対象を探しています', 'done': 0, 'total': 0}
+            self.read_errors={}
+            self.discovery_limited=False
             specs = self.discover()
             self.progress['total'] = len(specs)
             items = []
@@ -766,7 +780,7 @@ class Studio:
             if folder.is_symlink() or self.blocked(folder):
                 continue
             try:
-                for p in sorted(folder.iterdir()):
+                for p in self.directory(folder,1000):
                     count += 1
                     if count > 1000 or len(files) >= 100:
                         break

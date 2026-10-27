@@ -36,7 +36,7 @@ def fixed_specs(studio):
     result=[(h/path,'cache',title,'再取得できます。関連アプリの実行中は保持します。','expanded') for path,(title,_) in CACHES.items()]
     devices=h/'Library/Developer/Xcode/iOS DeviceSupport'
     try:
-        for p in sorted(devices.iterdir())[:100]:
+        for p in studio.directory(devices,100):
             if p.is_dir() and not p.is_symlink():
                 result.append((p,'cache','iOSデバッグ用シンボル / '+p.name,'OSシンボルのキャッシュ。次の実機接続・デバッグ時に再取得が必要です。','expanded'))
     except OSError:
@@ -45,7 +45,7 @@ def fixed_specs(studio):
     for relative,category in (('Library/Caches','cache'),('Library/Developer/Xcode','other'),('Library/Application Support/devpurge/quarantine','other')):
         base=h/relative
         try:
-            for p in sorted(base.iterdir())[:200]:
+            for p in studio.directory(base,200):
                 if not p.is_symlink() and not studio.blocked(p):
                     result.append((p,category,p.name,'保管場所を調査。用途・再生成元を確認できないものは保持。','review'))
         except OSError:
@@ -64,11 +64,7 @@ def discover(studio):
         if root in seen or studio.blocked(root) or root.is_symlink():continue
         seen.add(root)
         try:
-            entries=[]
-            with os.scandir(root) as iterator:
-                for n,e in enumerate(iterator):
-                    if n>=15000:limited=True;break
-                    if e.is_dir(follow_symlinks=False):entries.append(Path(e.path))
+            entries=studio.directory(root,dirs_only=True)
         except OSError:
             continue
         for p in sorted(entries):

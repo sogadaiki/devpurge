@@ -173,7 +173,10 @@ class Quarantine:
                     raise ValueError('元プロジェクトから隔離物への参照があるため保持')
 
     def verify(self,row):
-        row=self.entry(row['id']);original,stored=self.paths(row)
+        row=self.entry(row['id'])
+        # Probe in a read-only child before touching protected project folders.
+        self.s.directory(Path(row['original']).parent,1)
+        original,stored=self.paths(row)
         meta=self.catalog()['entries'].get(row['uuid'],{})
         if meta.get('review_after',0)>time.time():raise ValueError('保持期間を延長したため保持')
         folder,target=self.binding(row)

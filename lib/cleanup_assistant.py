@@ -46,6 +46,8 @@ class Assistant:
             return self.quarantine.verify(item)
         s = self.studio
         p = s.physical(Path(item['path']))
+        if any(p.is_relative_to(Path(root)) for root in s.read_errors):
+            raise ValueError('フォルダの読み取り未完了のため保持')
         if not p.is_dir() or p.stat().st_uid != os.getuid():
             raise ValueError('所有者・フォルダを確認できないため保持')
         fixed = {str(path): action for path, _, _, _, action in s.targets()}
@@ -206,6 +208,7 @@ class Assistant:
                           'render_error':render_error,
                           'scope': '開発フォルダ9階層、Codex/Claudeの隠しworktree内、開発ツールとアプリのキャッシュ、大容量の保存場所。原本・履歴は保持。親子の容量は重複するため合算しません。',
                           'locations':len(rows),'ai_locations':review['completed'],
+                          'unreadable_locations':s.read_errors,
                           'large_locations':sorted(scan.get('landscape',[]),key=lambda x:x.get('bytes') or 0,reverse=True)[:12],
                           'discovery_limited': scan['discovery_limited'] or getattr(s,'expanded_limited',False)}
                 care.save(self.state / 'report.json', report)
