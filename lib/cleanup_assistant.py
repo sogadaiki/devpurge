@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import time
 import render_care as care
+import expanded_scope
+import concurrent.futures
 
 POLICY = ('You help organize disk storage. Do not use any tools or inspect files. '
           'Only classify the supplied metadata. Return exactly one decision per id, with a concise Japanese reason. '
@@ -42,10 +44,14 @@ class Assistant:
             raise ValueError('所有者・フォルダを確認できないため保持')
         fixed = {str(path): action for path, _, _, _, action in s.targets()}
         kind, manifest = 'download-cache', None
+        extra = None
         if fixed.get(str(p)) != 'trash':
             # Only ignored Next build outputs with retained build instructions.
-            if p.name not in ('.next', '.open-next') or not p.is_relative_to(s.home / 'Desktop/development'):
-                raise ValueError('原本・履歴・環境・用途不明のデータは保持')
+            if p.name not in ('.next', '.open-next'):
+                extra = expanded_scope.evidence(s,p)
+                tree=s.tree(p);s.idle(p,tree['newest'])
+                return {**extra,'tree':tree,'identity':care.identity(p)}
+            if not expanded_scope.in_projects(p,s.home):raise ValueError('対応範囲外のため保持')
             package = s.physical(p.parent / 'package.json')
             if not package.is_file() or package.stat().st_size > 1048576:
                 raise ValueError('再生成元の設定を確認できないため保持')
@@ -92,17 +98,32 @@ class Assistant:
         scan = self.studio.scan()
         with self.studio.lock:
             s = self.studio
-            s.progress.update(running=True, message='削除可能性と作業中のデータを確認しています', done=0, total=len(scan['items']))
+            s.progress.update(running=True, message='隠し作業フォルダ・開発ツール・アプリ別キャッシュまで調べています', done=0, total=0)
             try:
+                specs=expanded_scope.fixed_specs(s)+expanded_scope.discover(s)
+                # Overlapping parent storage totals remain informational only;
+                # child candidates are separately verified, never summed twice.
+                items={x['path']:x for x in scan['items']}
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                    for item in pool.map(s.measure,specs):
+                        if item:
+                            previous=items.get(item['path'])
+                            if previous and item['action']=='review':continue
+                            item['delta']=(previous or {}).get('delta')
+                            items[item['path']]=item
+                for item in scan.get('landscape',[]):
+                    if item['path'] not in items:
+                        items[item['path']]={**item,'delta':None}
+                s.progress.update(message='削除可能性と作業中のデータを確認しています',done=0,total=len(items))
                 rows = []
-                for item in scan['items']:
+                for item in items.values():
                     row = {k: item.get(k) for k in ('id', 'path', 'title', 'category', 'bytes', 'delta', 'reason')}
                     row.update(ready=False, local_verified=False)
                     # Only supported deletion grammars need expensive checks.
-                    if item.get('action') == 'trash' or (item.get('category') == 'build' and Path(item['path']).name in ('.next', '.open-next')):
+                    if item.get('action') in ('trash','expanded') or (item.get('category') == 'build' and Path(item['path']).name in ('.next', '.open-next')):
                         try:
                             row['proof'] = self.local_check(item)
-                            row.update(local_verified=True, reason='再生成でき、使用中ではないことを確認')
+                            row.update(local_verified=True, reason='再生成でき、使用中ではないことを確認。'+item.get('reason',''))
                         except (ValueError, OSError, subprocess.SubprocessError) as e:
                             row['reason'] = str(e)
                     rows.append(row)
@@ -154,7 +175,10 @@ class Assistant:
                 report = {'at': time.time(), 'scan_at': scan['at'], 'free': shutil.disk_usage(s.home).free,
                           'rows': rows, 'review': review, 'primary': primary, 'reviewer': reviewer,
                           'render_error':render_error,
-                          'scope': scan['scope'], 'discovery_limited': scan['discovery_limited']}
+                          'scope': '開発フォルダ9階層、Codex/Claudeの隠しworktree内、開発ツールとアプリのキャッシュ、大容量の保存場所。原本・履歴は保持。親子の容量は重複するため合算しません。',
+                          'locations':len(rows),'ai_locations':len(facts),
+                          'large_locations':sorted(scan.get('landscape',[]),key=lambda x:x.get('bytes') or 0,reverse=True)[:12],
+                          'discovery_limited': scan['discovery_limited'] or getattr(s,'expanded_limited',False)}
                 care.save(self.state / 'report.json', report)
                 return report
             finally:
