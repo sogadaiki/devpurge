@@ -572,21 +572,21 @@ old_epoch=$(( $(date +%s) - 40 * 86400 ))
 sed -i '' "s/^${q_last_id}	[0-9]*	/${q_last_id}	${old_epoch}	/" "${DEVPURGE_QUARANTINE_DIR}/manifest.tsv"
 devpurge_quarantine_expire >/dev/null 2>&1
 TOTAL=$((TOTAL + 1))
-if [[ ! -e "${DEVPURGE_QUARANTINE_DIR}/${q_last_id}-target" ]]; then
-  printf "  PASS: quarantine expire deletes old entries\n"
+if [[ -e "${DEVPURGE_QUARANTINE_DIR}/${q_last_id}-target" ]]; then
+  printf "  PASS: quarantine expire preserves old entries for human confirmation\n"
   PASS=$((PASS + 1))
 else
-  printf "  FAIL: expired entry still present\n"
+  printf "  FAIL: expired entry was deleted\n"
   FAIL=$((FAIL + 1))
 fi
 
 # expired row is dropped from the manifest (no future ID collision)
 TOTAL=$((TOTAL + 1))
-if ! grep -q "^${q_last_id}	" "${DEVPURGE_QUARANTINE_DIR}/manifest.tsv" 2>/dev/null; then
-  printf "  PASS: expire removes manifest row\n"
+if cut -f1 "${DEVPURGE_QUARANTINE_DIR}/manifest.tsv" | grep -qx "$q_last_id"; then
+  printf "  PASS: expire preserves restoration record\n"
   PASS=$((PASS + 1))
 else
-  printf "  FAIL: expired row still in manifest\n"
+  printf "  FAIL: restoration record missing\n"
   FAIL=$((FAIL + 1))
 fi
 

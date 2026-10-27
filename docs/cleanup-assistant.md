@@ -1,8 +1,9 @@
 # AI cleanup assistant
 
-Project quarantine lifecycle is specified in
-[quarantine-disposal-design.md](quarantine-disposal-design.md). It is a future
-design, not an implemented deletion capability or a change to legacy expiry.
+Project quarantine lifecycle is implemented for supported audited Next outputs
+and identical dependency copies; see [quarantine-disposal-design.md](quarantine-disposal-design.md).
+Legacy quarantine expiry is now report-only. The assistant includes verified
+quarantine entries and retains the user's final permanent-deletion action.
 
 The app starts at **AIで片付ける**. The manual workflow is:
 

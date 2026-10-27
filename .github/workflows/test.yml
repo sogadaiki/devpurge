@@ -41,6 +41,9 @@ jobs:
       - name: Verify expanded cleanup scope guards
         run: python3 test/test_expanded_scope.py
 
+      - name: Verify quarantine disposal and restore guards
+        run: python3 test/test_quarantine_store.py
+
       - name: Verify native lifecycle and installer rollback
         run: python3 test/test_native.py
 

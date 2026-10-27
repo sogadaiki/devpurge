@@ -11,6 +11,7 @@ import subprocess
 import time
 import render_care as care
 import expanded_scope
+import quarantine_store
 import concurrent.futures
 
 POLICY = ('You help organize disk storage. Do not use any tools or inspect files. '
@@ -25,6 +26,7 @@ class Assistant:
     def __init__(self, studio):
         self.studio = studio
         self.state = studio.home / 'Library/Application Support/devpurge/assistant'
+        self.quarantine = quarantine_store.Quarantine(studio)
 
     @contextlib.contextmanager
     def lock(self):
@@ -34,11 +36,14 @@ class Assistant:
         fd = os.open(self.state / 'lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            yield
+            with self.quarantine.locked():
+                yield
         finally:
             os.close(fd)
 
     def local_check(self, item):
+        if item.get('kind')=='quarantine':
+            return self.quarantine.verify(item)
         s = self.studio
         p = s.physical(Path(item['path']))
         if not p.is_dir() or p.stat().st_uid != os.getuid():
@@ -161,14 +166,19 @@ class Assistant:
                         items[item['path']]={**item,'delta':None}
                 s.progress.update(message='削除可能性と作業中のデータを確認しています',done=0,total=len(items))
                 rows = []
+                for item in self.quarantine.entries():
+                    items[item['path']]={**item,'action':'quarantine'}
                 for item in items.values():
-                    row = {k: item.get(k) for k in ('id', 'path', 'title', 'category', 'bytes', 'delta', 'reason')}
+                    row = {k: item.get(k) for k in ('id', 'path', 'title', 'category', 'bytes', 'delta', 'reason','kind','original','qid','review_after')}
                     row.update(ready=False, local_verified=False)
                     # Only supported deletion grammars need expensive checks.
-                    if item.get('action') in ('trash','expanded') or (item.get('category') == 'build' and Path(item['path']).name in ('.next', '.open-next')):
+                    if item.get('action') in ('trash','expanded','quarantine') or (item.get('category') == 'build' and Path(item['path']).name in ('.next', '.open-next')):
                         try:
                             row['proof'] = self.local_check(item)
                             row.update(local_verified=True, reason='再生成でき、使用中ではないことを確認。'+item.get('reason',''))
+                            if item.get('kind')=='quarantine':
+                                row['bytes']=row['proof']['tree']['bytes']
+                                row['reason']='隔離時の内容と保持元を再検証。'+row['proof']['reconstruction']
                         except (ValueError, OSError, subprocess.SubprocessError) as e:
                             row['reason'] = str(e)
                     rows.append(row)
@@ -261,11 +271,15 @@ class Assistant:
                         raise ValueError('対象が入れ替わったため保持')
                     entry['status'] = 'deleting'
                     care.save(path, receipt)
+                    if row.get('kind')=='quarantine':self.quarantine.mark(row['proof']['record'],'deleting')
                     shutil.rmtree(p.name, dir_fd=fd)
                 finally:
                     os.close(fd)
                 entry.update(status='removed', bytes=row['proof']['tree']['bytes'])
                 receipt['removed_bytes'] += entry['bytes']
+                if row.get('kind')=='quarantine':
+                    self.quarantine.mark(row['proof']['record'],'deleted')
+                    self.quarantine.drop(row['proof']['record'])
             except (OSError, ValueError, TypeError, subprocess.SubprocessError) as e:
                 entry.update(status='kept-or-partial', reason=str(e))
             care.save(path, receipt)

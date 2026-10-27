@@ -100,7 +100,7 @@ USAGE
   devpurge quarantine <path> [reason]   Move a path into quarantine (30d grace)
   devpurge quarantine --list            Show quarantined items
   devpurge quarantine --restore <ID>    Restore an item to its original path
-  devpurge quarantine --expire          Delete items past the grace period
+  devpurge quarantine --expire          List items due for review (no deletion)
   devpurge archive --dry-run            Inspect the configured archive (read-only)
   devpurge archive --track              Register new files; never backdate arrival
   devpurge archive --touch <path>       Restart retention before reusing an archive

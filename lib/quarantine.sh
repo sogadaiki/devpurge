@@ -3,7 +3,7 @@
 #
 # Nothing judged by heuristics or AI is deleted directly. It is moved into
 # ~/.devpurge/quarantine/ with a manifest, restorable for QUARANTINE_DAYS
-# (default 30), and only expired entries are actually deleted.
+# (default 30). Age prompts review; permanent deletion requires the app.
 #
 # Manifest format (TSV): ID  DATE_EPOCH  ORIGINAL_PATH  SIZE_KB  STORED_PATH  REASON
 #
@@ -43,7 +43,7 @@ devpurge_is_protected() {
 
 # Move a path into quarantine.
 # Args: $1=path $2=reason
-devpurge_quarantine_add() {
+_dp_quarantine_add_locked() {
   local target="$1" reason="${2:-manual}"
 
   # Normalize: strip trailing slash, require absolute existing path under $HOME
@@ -93,12 +93,22 @@ devpurge_quarantine_add() {
       ''|*[!0-9]*) max_id=0 ;;
     esac
   fi
+  local last_id=0
+  if [[ -f "${DEVPURGE_QUARANTINE_DIR}/last-id" ]]; then
+    read -r last_id < "${DEVPURGE_QUARANTINE_DIR}/last-id"
+    case "$last_id" in ''|*[!0-9]*) dp_error "Invalid quarantine ID counter"; return 1 ;; esac
+    [[ "$last_id" -gt "$max_id" ]] && max_id="$last_id"
+  fi
   local qid
   qid=$(printf "Q%03d" $((max_id + 1)))
+  printf '%s\n' "$((max_id + 1))" > "${DEVPURGE_QUARANTINE_DIR}/last-id" || return 1
 
   local stored="${DEVPURGE_QUARANTINE_DIR}/${qid}-$(basename "$target")"
+  if [[ -e "$stored" || -L "$stored" ]]; then
+    dp_error "Quarantine destination already exists; nothing moved"
+    return 1
+  fi
   if ! mv "$target" "$stored" 2>/dev/null; then
-    rm -rf "$stored" 2>/dev/null
     dp_error "quarantine: move failed for $target"
     return 1
   fi
@@ -111,7 +121,7 @@ devpurge_quarantine_add() {
     "$qid" "$(date +%s)" "$target" "$size_kb" "$stored" "$reason" >> "$manifest"
 
   dp_success "  Quarantined ${qid}: $(bytes_to_human $((size_kb * 1024)))  $target"
-  dp_dim "  Restore anytime within ${DEVPURGE_QUARANTINE_DAYS} days: devpurge quarantine --restore ${qid}"
+  dp_dim "  Restore until you confirm deletion in the app: devpurge quarantine --restore ${qid}"
   return 0
 }
 
@@ -127,7 +137,7 @@ devpurge_quarantine_list() {
   local now
   now=$(date +%s)
   printf "\n"
-  dp_bold "  devpurge quarantine (expires after ${DEVPURGE_QUARANTINE_DAYS} days)"
+  dp_bold "  devpurge quarantine (review after ${DEVPURGE_QUARANTINE_DAYS} days; no automatic deletion)"
   printf "\n"
   printf "  ${CLR_DIM}%-5s %-9s %-9s %-8s %s${CLR_RESET}\n" "ID" "Size" "Age" "State" "Original path"
 
@@ -141,7 +151,7 @@ devpurge_quarantine_list() {
     local age_days=$(( (now - epoch) / 86400 ))
     local state="held"
     if [[ "$age_days" -ge "$DEVPURGE_QUARANTINE_DAYS" ]]; then
-      state="EXPIRED"
+      state="REVIEW"
     fi
     printf "  %-5s %-9s %-9s %-8s %s\n" \
       "$qid" "$(bytes_to_human $((size_kb * 1024)))" "${age_days}d" "$state" "$orig"
@@ -162,7 +172,7 @@ _dp_manifest_drop() {
 }
 
 # Restore an entry by ID
-devpurge_quarantine_restore() {
+_dp_quarantine_restore_locked() {
   local want="$1"
   local manifest
   manifest=$(_dp_quarantine_manifest)
@@ -202,7 +212,7 @@ devpurge_quarantine_restore() {
   return 1
 }
 
-# Delete entries older than DEVPURGE_QUARANTINE_DAYS. Called from cleanup runs.
+# Review only. Legacy callers, including unattended cleanup, cannot delete.
 # Args: $1 = "dry" to only report
 devpurge_quarantine_expire() {
   local dry="${1:-}"
@@ -213,7 +223,6 @@ devpurge_quarantine_expire() {
   local now
   now=$(date +%s)
   local expired_kb=0 expired_count=0
-  local dropped_ids=()
 
   local qid epoch orig size_kb stored reason
   while IFS=$'\t' read -r qid epoch orig size_kb stored reason; do
@@ -221,37 +230,38 @@ devpurge_quarantine_expire() {
     local age_days=$(( (now - epoch) / 86400 ))
     [[ "$age_days" -lt "$DEVPURGE_QUARANTINE_DAYS" ]] && continue
 
-    if [[ "$dry" == "dry" ]]; then
-      expired_count=$((expired_count + 1))
-      expired_kb=$((expired_kb + size_kb))
-      continue
-    fi
-
-    # Stored path is always inside the quarantine dir; guard anyway
-    case "$stored" in
-      "$DEVPURGE_QUARANTINE_DIR"/*) ;;
-      *) continue ;;
-    esac
-    if rm -rf "$stored" 2>/dev/null; then
-      expired_count=$((expired_count + 1))
-      expired_kb=$((expired_kb + size_kb))
-      dropped_ids+=("$qid")
-      dp_dim "  Expired from quarantine: ${qid} $(basename "$stored") (held ${age_days}d)"
-    fi
+    expired_count=$((expired_count + 1))
+    expired_kb=$((expired_kb + size_kb))
   done < "$manifest"
 
-  # Remove expired rows so IDs never collide with future entries
-  local did
-  for did in "${dropped_ids[@]+"${dropped_ids[@]}"}"; do
-    [[ -n "$did" ]] && _dp_manifest_drop "$did"
-  done
-
   if [[ "$expired_count" -gt 0 ]]; then
-    if [[ "$dry" == "dry" ]]; then
-      dp_info "  Quarantine: ${expired_count} expired items ($(bytes_to_human $((expired_kb * 1024)))) will be deleted on next cleanup"
-    else
-      dp_success "  Quarantine expired: ${expired_count} items, $(bytes_to_human $((expired_kb * 1024))) freed"
-    fi
+    dp_info "  Quarantine: ${expired_count} items ($(bytes_to_human $((expired_kb * 1024)))) ready for review in the app; nothing deleted"
   fi
   return 0
 }
+
+# Same atomic directory lock used by the native app. A crash leaves a visible
+# lock rather than permitting concurrent or guessed stale-lock recovery.
+_dp_quarantine_locked() {
+  mkdir -p "$DEVPURGE_QUARANTINE_DIR" || return 1
+  local lock="${DEVPURGE_QUARANTINE_DIR}/.operation-lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    dp_error "Quarantine operation is busy or interrupted; nothing changed"
+    return 1
+  fi
+  local result=0
+  if [[ ! -e "${DEVPURGE_QUARANTINE_DIR}/last-id" ]]; then
+    local initial=0 manifest
+    manifest=$(_dp_quarantine_manifest)
+    if [[ -f "$manifest" ]]; then
+      initial=$(cut -f1 "$manifest" | sed 's/^Q0*//' | sort -rn | head -1 || true)
+      case "$initial" in ''|*[!0-9]*) initial=0 ;; esac
+    fi
+    printf '%s\n' "$initial" > "${DEVPURGE_QUARANTINE_DIR}/last-id"
+  fi
+  "$@" || result=$?
+  rmdir "$lock" || return 1
+  return "$result"
+}
+devpurge_quarantine_add() { _dp_quarantine_locked _dp_quarantine_add_locked "$@"; }
+devpurge_quarantine_restore() { _dp_quarantine_locked _dp_quarantine_restore_locked "$@"; }
