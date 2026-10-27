@@ -7,6 +7,10 @@ reclaim identical Remotion temporary copies after original-file and activity
 checks, with Codex classification and actual free-space readback. Optional
 ten-minute care requires explicit setup. See [render care](docs/render-care.md).
 
+**Ended jobs:** Studio can inspect orphaned Remotion browsers and manually close
+only those with disconnected controllers and stopped render servers.
+No forced termination or schedule. See [manual job recovery](docs/job-recovery.md).
+
 Open **devpurge Studio.app** for a dedicated Mac window, daily care, diagnosis
 and recovery. Build/install locally with `python3 scripts/install-studio-app.py`
 (macOS12+, Swift toolchain and Python3.9+). The app lives in `~/Applications/`,
