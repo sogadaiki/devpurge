@@ -22,6 +22,22 @@ Trash/restore workflows remain available elsewhere for reviewable intermediates.
   are held. Package manifest identity is rechecked before deleting.
 - Registered Remotion temporary copies are included in the same proposal using
   existing retained-original proofs, partial-copy handling and activity checks.
+- The additional scan descends up to nine levels through development projects,
+  Codex worktrees and each project's hidden Claude/`.worktrees` container. It
+  stops at 20,000 visited entries or 20 seconds and reports incomplete coverage.
+  Session/configuration stores are not traversed. Measurements use four workers.
+- Known application download/display caches are individually allowlisted;
+  related running apps block removal. No blanket `Library/Caches` deletion.
+- Recognized per-device Xcode OS symbol caches require the expected name/layout,
+  no links, no active Xcode/compiler/debugger, and the common inactivity checks.
+  Reconnecting/debugging the device may require downloading symbols again.
+- Xcode module/intermediate caches require retained `info.plist` and an existing
+  local workspace, Git-ignored/untracked output and no active build/project.
+  Godot shader caches require a retained `project.godot`, ignored/untracked
+  output and no active Godot/project. Imported assets remain review-only.
+- Large project, application, Downloads and document totals remain visible as
+  retained inventory. Parent/child totals overlap and are not added together.
+  The UI distinguishes measured locations from the maximum 80 AI-reviewed rows.
 - Ended-browser recovery and memory/swap diagnosis remain separate advanced
   screens. The one-button workflow does not close user processes.
 
@@ -29,6 +45,12 @@ This is not a whole-disk eraser. Source media, session history, generated images
 model weights, virtual environments, worktrees, unknown intermediates and
 user documents remain held with reasons. The scan reports its bounded scope.
 Large size alone is not permission to delete; empty candidates are a valid result.
+
+Regeneration references: [Apple derived data](https://help.apple.com/xcode/mac/current/en.lproj/deva52afe8a4.html),
+[Apple OS symbols](https://developer.apple.com/documentation/xcode/acquiring-operating-system-symbol-information),
+[Godot import pipeline](https://docs.godotengine.org/en/stable/tutorials/assets_pipeline/import_process.html).
+These describe generated data; local identity, retained source and activity
+checks are still required for each candidate.
 
 ## Codex CLI
 
