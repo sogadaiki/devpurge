@@ -550,6 +550,8 @@ def main():
             result = {**result, 'items': [{k: v for k, v in r.items() if k != 'proof'} for r in result['items']]}
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (OSError, ValueError, subprocess.SubprocessError) as e:
+        if args.command == 'watch':
+            save(care.state / 'service-status.json', {'at': time.time(), 'ok': False, 'error': str(e)})
         parser.exit(1, str(e) + '\n')
 
 

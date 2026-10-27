@@ -48,6 +48,7 @@ def care_state(home):
     latest['items'] = [{k: v for k, v in row.items() if k != 'proof'} for row in latest.get('items', [])]
     return {'latest': latest, 'config': read('config.json', {}), 'review': read('review.json', {}),
             'receipt': read('last-receipt.json', {}), 'operation': read('operation.json', {}),
+            'service': read('service-status.json', {}),
             'history': read('history.json', [])[-144:]}
 PROTECTED = ['証拠', '裁判', '訴訟', '別訴', '告訴', '準備書面', '判決', '弁護士', '法務', '原本', '契約書']
 GENERATED = {'node_modules': 'dependencies', '.next': 'build', '.open-next': 'build', '.venv': 'python', 'venv': 'python', '__pycache__': 'build'}
