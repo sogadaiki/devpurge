@@ -43,10 +43,11 @@ def build(app, root, python):
     shutil.copytree(root / 'ui', engine / 'ui')
     info = {'CFBundleName': 'devpurge Studio', 'CFBundleDisplayName': 'devpurge Studio',
             'CFBundleIdentifier': BUNDLE_ID, 'CFBundleVersion': '3',
-            'CFBundleShortVersionString': '0.16.1', 'CFBundleExecutable': 'studio',
+            'CFBundleShortVersionString': '0.17.0', 'CFBundleExecutable': 'studio',
             'CFBundlePackageType': 'APPL', 'LSMinimumSystemVersion': '12.0',
             'CFBundleIconFile': 'engine/ui/assets/companion.png',
             'NSHighResolutionCapable': True, 'NSPrincipalClass': 'NSApplication',
+            'NSDesktopFolderUsageDescription': '作業データの容量と保持元を照合します。完全削除はアプリで確認したときだけ実行します。',
             'StudioPython': str(python),
             'NSAppTransportSecurity': {'NSAllowsLocalNetworking': True}}
     (contents / 'Info.plist').write_bytes(plistlib.dumps(info))

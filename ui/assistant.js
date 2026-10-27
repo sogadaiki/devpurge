@@ -46,6 +46,26 @@ async function loadAssistant(){
    ${quarantineHTML(quarantine.items,op.running)}
    ${receipt.at?`<div class="panel"><h3>前回の実行結果</h3><p>${new Date(receipt.at*1000).toLocaleString('ja-JP')} ／ ${receipt.status==='completed'?'整理完了':'一部を保持・結果を確認してください'}</p>${(receipt.items||[]).map(x=>`<p>${esc(x.title)}：${x.status==='removed'?'削除済み':esc(x.reason||x.status)}</p>`).join('')}<p>削除対象の計測量 ${bytes(receipt.removed_bytes)} ／ 空き容量 ${bytes(receipt.before_free)} → ${bytes(receipt.after_free)}</p></div>`:''}`;
   bindQuarantine(assistantSection,loadAssistant);
+  if(r.review?.groups){
+   const coverage=document.createElement('p');coverage.className='muted';
+   coverage.textContent=`同じ検証条件を${r.review.groups}グループにまとめ、全項目との対応を保ってAIが判定します。ファイルごとの安全確認は個別に行います。`;
+   assistantSection.querySelector('.panel').append(coverage);
+  }
+  if(quarantine.external?.length){
+   const external=document.createElement('details');external.className='panel';
+   external.innerHTML=`<summary>別セッションの隔離台帳外の記録（${quarantine.external.length}件）</summary><p>取り込み済みの監査記録です。ゴミ箱など別の保存先は、隔離データと混ぜて削除しません。</p>${quarantine.external.map(x=>`<p><strong>${esc(x.audit)} / ${esc(x.id)}</strong><br>${esc(x.path)}<br>${esc(x.reason)}</p>`).join('')}`;
+   assistantSection.append(external);
+  }
+  if(!op.running&&Object.keys(r.unreadable_locations||{}).length&&window.webkit?.messageHandlers?.refresh){
+   const access=document.createElement('button');access.textContent='作業フォルダの読み取りを許可';
+   access.onclick=()=>act(async()=>{const result=await window.webkit.messageHandlers.refresh.postMessage({action:'folder-access'});notice(result.granted?'許可した場所を「AIで片付ける」で再確認できます。':'許可を変更していません。');});
+   assistantSection.querySelector('.panel').append(access);
+  }
+  if(!op.running&&eligible.length){
+   const confirm=document.createElement('button');confirm.textContent='まとめて削除内容を確認';confirm.className='primary';
+   confirm.onclick=()=>act(async()=>{confirm.disabled=true;try{showAssistantPlan(await api('assistant',{action:'plan',ids:eligible.map(x=>x.id)}));}finally{confirm.disabled=false;}});
+   assistantSection.querySelector('.panel').append(confirm);
+  }
   $('#assistant-start').onclick=()=>act(async()=>{
    await api('assistant',{action:'prepare',primary:'sol',reviewer:'terra'});
    assistantAwaitingReview=true;await loadAssistant();poll();

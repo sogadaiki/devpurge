@@ -40,6 +40,71 @@ class QuarantineTests(unittest.TestCase):
     def test_verified_build_is_not_deleted_by_inspection(self):
         self.assertEqual(self.q.verify(self.row)['kind'],'quarantine');self.assertTrue(self.stored.exists())
 
+    def duplicate_file(self):
+        self.original=self.project/'old.mp4';self.stored=self.q.root/'Q101-old.mp4'
+        self.stored.write_bytes(b'same retained media');self.anchor=self.project/'primary.mp4';self.anchor.write_bytes(self.stored.read_bytes())
+        (self.q.root/'manifest.tsv').write_text('Q101\t%s\t%s\t4\t%s\tduplicate\n'%(self.epoch,self.original,self.stored))
+        self.row=self.q.entries()[0]
+        target={'path':str(self.original),'kind':'verified_duplicate','contents':self.q.content_map(self.stored)[0],'retained_path':str(self.anchor)}
+        qs.care.save(self.folder/'execution-plan.json',{'root':str(self.project),'targets':[target]})
+        qs.care.save(self.folder/'movement-receipt.json',[{'id':'Q101','original':str(self.original),'stored':str(self.stored),'content_verified':True}])
+
+    def test_timestamp_less_file_receipt_requires_current_identical_original(self):
+        self.duplicate_file()
+        self.assertEqual(self.q.verify(self.row)['kind'],'quarantine')
+        self.anchor.write_bytes(b'changed original')
+        with self.assertRaises(ValueError):self.q.verify(self.row)
+        self.assertTrue(self.stored.exists())
+
+    def test_timestamp_mismatch_still_rejected(self):
+        self.duplicate_file()
+        path=self.folder/'movement-receipt.json';data=self.q.read_json(path);data[0]['epoch']=self.epoch+1;qs.care.save(path,data)
+        with self.assertRaises(ValueError):self.q.verify(self.row)
+
+    def test_file_deletion_keeps_original_and_receipt(self):
+        self.duplicate_file();self.test_final_ticket_required_and_audit_retained_after_deletion()
+        self.assertEqual(self.anchor.read_bytes(),b'same retained media')
+
+    def new_build(self,kind):
+        name='dist' if kind=='obsolete_generated_build' else 'webpack'
+        self.original=self.project/name if name=='dist' else self.project/'node_modules/.cache/webpack'
+        self.original.parent.mkdir(parents=True,exist_ok=True)
+        dest=self.q.root/('Q100-'+name);self.stored.rename(dest);self.stored=dest
+        (self.project/'package.json').write_text(json.dumps({'scripts':{'build':'vite build'},'dependencies':{'vite':'1','remotion':'1'}}))
+        (self.project/'.gitignore').write_text('dist/\nnode_modules/\n')
+        if name=='dist':
+            (dest/'generated').rename(dest/'index.html')
+            (self.project/'index.html').write_text('source template')
+            (self.project/'vite.config.ts').write_text('fixture build config')
+        target={'path':str(self.original),'kind':kind,'repo':str(self.project),'contents':self.q.content_map(dest)[0]}
+        sources={str(p):self.q.content_map(p)[0]['.'] for p in [self.project/n for n in ('package.json','package-lock.json','index.html','vite.config.ts')] if p.exists()}
+        qs.care.save(self.folder/'execution-plan.json',{'targets':[target],'retained_sources':sources})
+        qs.care.save(self.folder/'movement-receipt.json',[{'id':'Q100','original':str(self.original),'stored':str(dest)}])
+        (self.q.root/'manifest.tsv').write_text('\t'.join(['Q100',str(self.epoch),str(self.original),'4',str(dest),'fixture'])+'\n')
+        self.row=self.q.entries()[0]
+
+    def test_webpack_receipt_rechecks_contents_and_source(self):
+        self.new_build('regenerable_webpack_cache');self.q.verify(self.row)
+        (self.stored/'generated').write_text('different')
+        with self.assertRaises(ValueError):self.q.verify(self.row)
+
+    def test_vite_build_holds_changed_source(self):
+        self.new_build('obsolete_generated_build');self.q.verify(self.row)
+        (self.project/'package-lock.json').write_text('new environment')
+        with self.assertRaises(ValueError):self.q.verify(self.row)
+
+    def test_vite_unknown_original_is_held_even_when_in_receipt(self):
+        self.new_build('obsolete_generated_build');(self.stored/'unique.mp4').write_bytes(b'original')
+        path=self.folder/'execution-plan.json';plan=self.q.read_json(path)
+        plan['targets'][0]['contents']=self.q.content_map(self.stored)[0];qs.care.save(path,plan)
+        with self.assertRaises(ValueError):self.q.verify(self.row)
+
+    def test_external_receipts_are_visible_without_delete_authority(self):
+        other=self.q.audits/'other';other.mkdir()
+        qs.care.save(other/'movement-receipt.json',[{'id':'T1','original':'/original','stored':'/arbitrary','bytes':123}])
+        self.assertEqual(self.q.external_records()[0]['path'],'/arbitrary')
+        with self.assertRaises(ValueError):self.q.entry('T1')
+
     def test_changed_source_or_target_kept(self):
         (self.project/'package-lock.json').write_text('changed')
         with self.assertRaises(ValueError):self.q.verify(self.row)
