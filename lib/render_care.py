@@ -38,7 +38,7 @@ def run(argv, timeout=30):
                           env=environment)
 
 
-def resolve_model(role):
+def resolve_model(role, excluded=()):
     """Use the installed CLI's advertised models, not the desktop's catalog."""
     catalog = Path.home() / '.codex/models_cache.json'
     if catalog.exists() and not catalog.is_symlink():
@@ -47,7 +47,7 @@ def resolve_model(role):
         for row in data.get('models', []):
             slug = row.get('slug', '')
             match = re.fullmatch(r'gpt-(\d+)(?:\.(\d+))?-' + re.escape(role), slug)
-            if match:
+            if match and slug not in excluded:
                 matches.append(((int(match[1]), int(match[2] or 0)), slug))
         if matches:
             return max(matches)[1]
@@ -462,7 +462,7 @@ class Care:
             return self.apply(result, ai) if apply and ai['status'] == 'reviewed' else {'scan': result, 'ai': ai}
 
 
-def model_review(rows, model, state, runner=run):
+def model_review(rows, model, state, runner=run, policy=None):
     if model not in MODELS:
         raise ValueError('Unsupported model')
     schema = {'type': 'object', 'additionalProperties': False, 'required': ['decisions'], 'properties': {
@@ -473,23 +473,46 @@ def model_review(rows, model, state, runner=run):
     executable = shutil.which('codex')
     if not executable:
         raise ValueError('Codex CLI unavailable; keeping candidates')
-    resolved_model = resolve_model(model)
     # Isolated ephemeral cwd; user config is disabled and no source contents are
     # supplied. CLI global instructions may still load. Auth is reused by CLI.
     with tempfile.TemporaryDirectory(prefix='model-', dir=state) as directory:
         directory = Path(directory)
         save(directory / 'schema.json', schema)
-        prompt = ('Classify these trusted LOCAL verification facts. Do not use any tools. '
+        prompt = (policy or 'Classify these trusted LOCAL verification facts. Do not use any tools. '
                   'Return exactly one decision per id. cleanup only for local_verified=true, '
                   'retained_originals=true, active=false bundles. Otherwise keep; review if uncertain. '
-                  'No filesystem actions. Facts: ' + json.dumps(rows, separators=(',', ':')))
-        p = runner([executable, 'exec', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check',
-                    '-C', str(directory), '-s', 'read-only', '-m', resolved_model,
-                    '-c', 'model_reasoning_effort="low"',
-                    '-c', 'forced_login_method="chatgpt"',
-                    '--output-schema', str(directory / 'schema.json'), '-o', str(directory / 'answer.json'), prompt], timeout=180)
-        if p.returncode != 0:
-            raise ValueError('Codex failed; no deletion (exit %s)' % p.returncode)
+                  'No filesystem actions.') + ' Facts: ' + json.dumps(rows, separators=(',', ':'))
+        # Desktop and CLI share a catalog but can have different entitlements.
+        # Fall back only within the requested family, only on model-unavailable
+        # errors, and only to versions actually advertised in the catalog.
+        rejected = load(state / 'unavailable-models.json', {})
+        excluded = {slug for slug, at in rejected.items() if 0 <= time.time()-at < 3600}
+        attempted = set()
+        while True:
+            try:
+                resolved_model = resolve_model(model, excluded) if excluded else resolve_model(model)
+            except ValueError as e:
+                raise ValueError(model + 'は現在のCodex CLIで利用できません。別のモデルを選択してください。削除はしていません。') from e
+            if resolved_model in attempted:
+                raise ValueError('Codexモデルを解決できません。削除はしていません。')
+            attempted.add(resolved_model)
+            p = runner([executable, 'exec', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check',
+                        '-C', str(directory), '-s', 'read-only', '-m', resolved_model,
+                        '-c', 'model_reasoning_effort="low"',
+                        '-c', 'forced_login_method="chatgpt"',
+                        '--output-schema', str(directory / 'schema.json'), '-o', str(directory / 'answer.json'), prompt], timeout=180)
+            if p.returncode == 0:
+                break
+            error = p.stderr.lower()
+            if 'model_not_found' in error or ('model' in error and 'not supported when using codex' in error):
+                rejected[resolved_model] = time.time()
+                excluded.add(resolved_model)
+                save(state / 'unavailable-models.json', rejected)
+                continue
+            reason = ('Codexへのログインを確認してください' if any(x in error for x in ('unauthorized', '401', 'not logged in')) else
+                      'Codexの利用上限またはクレジットを確認してください' if any(x in error for x in ('usage limit', 'rate limit', 'quota')) else
+                      'Codex CLIの実行に失敗しました。もう一度お試しください')
+            raise ValueError(reason + '。削除はしていません（exit %s）。' % p.returncode)
         output = directory / 'answer.json'
         if not output.is_file() or output.stat().st_size > 128000:
             raise ValueError('Invalid model response')

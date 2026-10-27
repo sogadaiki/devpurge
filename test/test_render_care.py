@@ -168,6 +168,26 @@ class Guards(unittest.TestCase):
                 with self.engine.locked():
                     self.fail('concurrent cleanup acquired lock')
 
+    def test_unavailable_model_uses_older_advertised_family(self):
+        calls = []
+        def fake(argv, **kwargs):
+            model = argv[argv.index('-m')+1]; calls.append(model)
+            if model == 'fixture-new':
+                return subprocess.CompletedProcess(argv, 1, '', 'model_not_found')
+            Path(argv[argv.index('-o')+1]).write_text(json.dumps({'decisions':[{'id':'real','decision':'keep','reason':'fixture'}]}))
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        with patch.object(care.shutil,'which',return_value='/fixture/codex'), patch.object(care,'resolve_model',side_effect=['fixture-new','fixture-old']):
+            result=care.model_review([{'id':'real'}],'sol',self.engine.state,runner=fake)
+        self.assertEqual(result['model'],'fixture-old')
+        self.assertEqual(calls,['fixture-new','fixture-old'])
+        self.assertIn('fixture-new',care.load(self.engine.state/'unavailable-models.json',{}))
+
+    def test_auth_error_does_not_retry_other_model(self):
+        with patch.object(care.shutil,'which',return_value='/fixture/codex'), patch.object(care,'resolve_model',return_value='fixture') as resolve:
+            with self.assertRaises(ValueError):
+                care.model_review([{'id':'real'}],'sol',self.engine.state,runner=lambda *a,**kw:subprocess.CompletedProcess([],1,'','401 unauthorized'))
+            self.assertEqual(resolve.call_count,1)
+
     def test_incomplete_measurement_is_not_zero(self):
         with patch.object(care, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'permission denied')):
             scan = self.engine.scan()

@@ -2,6 +2,11 @@
 
 ## Storage Studio
 
+**AI cleanup assistant:** The app opens at 「AIで片付ける」. Codex proposes,
+local checks verify, and you review exact targets before permanently reclaiming
+regenerable caches/builds. Actual freed space and retained reasons are shown.
+No new schedule. See [AI cleanup assistant](docs/cleanup-assistant.md).
+
 **Render care:** Studio's 「レンダリングの片付け」 and `devpurge render-care`
 reclaim identical Remotion temporary copies after original-file and activity
 checks, with Codex classification and actual free-space readback. Optional
