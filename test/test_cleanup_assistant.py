@@ -52,6 +52,24 @@ class CleanupAssistantTests(unittest.TestCase):
         self.assertEqual(r['completed'],841);self.assertEqual(len(r['batches']),1)
         self.assertTrue(all(x['ai_reviewed'] and not x['ready'] for x in rows))
 
+    def test_plan_failure_releases_progress_and_reports_current_item(self):
+        self.prepare()
+        def changed(row):
+            self.assertTrue(self.s.progress['running'])
+            self.assertIn(row['title'],self.s.progress['message'])
+            raise ValueError('changed')
+        with patch.object(self.a,'local_check',side_effect=changed):
+            with self.assertRaisesRegex(ValueError,'changed'):self.a.plan(['cache'])
+        self.assertFalse(self.s.progress['running'])
+        self.assertEqual(self.s.progress['done'],0)
+
+    def test_activity_does_not_scan_or_load_report(self):
+        with patch.object(self.a.quarantine,'entries',side_effect=AssertionError('no scan')),patch.object(self.s,'scan',side_effect=AssertionError('no scan')):
+            result=self.a.activity()
+        self.assertNotIn('report',result)
+        self.assertGreater(result['disk']['total'],0)
+        self.assertIsNot(result['progress'],self.s.progress)
+
     def test_late_batch_failure_keeps_candidates_and_continues_coverage(self):
         rows=[dict(id=str(n),category='category'+str(n),bytes=n,local_verified=n==0) for n in range(25)]
         calls=[]

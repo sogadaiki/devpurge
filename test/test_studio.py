@@ -54,6 +54,11 @@ class StudioTest(unittest.TestCase):
         self.s.restore(r['id'])
         self.assertEqual((self.cache / 'wheel').read_text(), 'fixture package')
 
+    def test_fast_containment_preserves_path_component_boundaries(self):
+        for root in (Path('/a/b'),Path('/'),Path('.'),Path('a'),Path('/a/../b')):
+            for path in (root,root/'child'/'nested',Path('/a/b-other'),Path('/a'),Path('a/b'),Path('/a/../b/c')):
+                self.assertEqual(module.inside(path,root),path==root or root in path.parents,(path,root))
+
     def test_recreated_source_not_overwritten(self):
         r = self.apply(self.make_plan())
         self.cache.mkdir()

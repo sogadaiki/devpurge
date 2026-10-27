@@ -80,7 +80,9 @@ def atomic_json(path, data):
 
 
 def inside(path, root):
-    return path == root or root in path.parents
+    # Lexical containment, as before; physical() separately rejects symlinks.
+    # Do not construct every parent Path for every file in a large inventory.
+    return path.anchor == root.anchor and path.parts[:len(root.parts)] == root.parts
 
 
 def deleted_open_files(output):
@@ -934,6 +936,8 @@ def handler(studio, token):
                 return self.send(200, job_recovery.Recovery(studio.home).status())
             if path == '/api/assistant':
                 return self.send(200, cleanup_assistant.Assistant(studio).status())
+            if path == '/api/assistant-progress':
+                return self.send(200, cleanup_assistant.Assistant(studio).activity())
             if path == '/api/quarantine':
                 try:
                     q=cleanup_assistant.Assistant(studio).quarantine
@@ -982,7 +986,7 @@ def handler(studio, token):
                         except Exception:
                             operation.__exit__(*sys.exc_info())
                             raise
-                        studio.progress['running'] = True
+                        studio.progress.update(running=True,message='調査を始めています',done=0,total=0)
                         def run_assistant():
                             try:
                                 assistant.prepare(primary, reviewer)
