@@ -21,6 +21,46 @@ CACHES = {
     'Library/Caches/notion.id.ShipIt': ('Notionの更新用キャッシュ', ('notion','shipit')),
     'Library/Caches/notion-updater': ('Notionの更新ダウンロード', ('notion','shipit')),
 }
+ELECTRON_APPS = {'Claude': ('claude',), 'Code': ('code',), 'Cursor': ('cursor',),
+                 'Slack': ('slack',), 'discord': ('discord',), 'Notion': ('notion',)}
+ELECTRON_CACHES = ('Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'DawnGraphiteCache', 'DawnWebGPUCache')
+
+
+def app_cache_owner(home, path):
+    """Only known Electron disk caches; never cookies, sessions or offline stores."""
+    try:parts=path.relative_to(home/'Library/Application Support').parts
+    except ValueError:return None
+    if not parts or parts[0] not in ELECTRON_APPS:return None
+    if (len(parts)==2 or (len(parts)==4 and parts[1]=='Partitions' and not parts[2].startswith('.'))) and parts[-1] in ELECTRON_CACHES:
+        return parts[0]
+    return None
+
+
+def application_specs(studio):
+    result=[];base=studio.home/'Library/Application Support'
+    for app in ELECTRON_APPS:
+        roots=[base/app]
+        partitions=base/app/'Partitions'
+        if partitions.is_dir():
+            try:roots.extend(p for p in studio.directory(partitions,64,dirs_only=True) if not p.name.startswith('.') and not p.is_symlink())
+            except OSError:pass
+        for root in roots:
+            for name in ELECTRON_CACHES:
+                p=root/name
+                if p.is_dir() and not p.is_symlink() and not studio.blocked(p):
+                    result.append((p,'cache',app+' / '+str(p.relative_to(base/app)),
+                        '表示用キャッシュ。会話・ログイン・オフライン保存は対象外。実行中は保持。','expanded'))
+    # Installer downloads are visible separately, without treating a suffix as deletion proof.
+    for relative,label in (('com.wondershare.Installer','インストーラ保管'),('Caches','アプリ更新ファイル')):
+        installers=base/relative
+        if installers.is_dir():
+            try:
+                for p in studio.directory(installers,64,dirs_only=True):
+                    if not p.is_symlink() and not studio.blocked(p):
+                        result.append((p,'other',label+' / '+p.name,
+                            'インストール済み本体と復元要否を確認。編集データや不明ファイルは保持。','review'))
+            except OSError:pass
+    return result
 
 
 def roots(home):
@@ -50,6 +90,7 @@ def fixed_specs(studio):
                     result.append((p,category,p.name,'保管場所を調査。用途・再生成元を確認できないものは保持。','review'))
         except OSError:
             pass
+    result.extend(application_specs(studio))
     return result
 
 
@@ -110,6 +151,10 @@ def manifest(studio, path):
 def evidence(studio, p):
     """Return evidence only for exact supported path grammars, never row labels."""
     h=studio.home
+    app=app_cache_owner(h,p)
+    if app:
+        process_guard(ELECTRON_APPS[app])
+        return {'kind':'electron-disk-cache','manifest':None}
     for relative,(_,tokens) in CACHES.items():
         if p==h/relative:
             process_guard(tokens)

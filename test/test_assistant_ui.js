@@ -2,6 +2,13 @@
 // Confirmation remains human-only; expired tickets cannot be submitted by UI.
 const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../ui/assistant.js'),'utf8');
+const quarantineContext=vm.createContext({esc:String,bytes:String,Date});
+vm.runInContext(source.slice(source.indexOf('function quarantineHTML('),source.indexOf('function bindQuarantine(')),quarantineContext);
+quarantineContext.items=[{id:'missing',title:'Missing',bytes:0,recorded_bytes:999,presence:'missing'},
+ {id:'unknown',title:'Unknown',bytes:null,presence:'unknown'},{id:'present',title:'Present',bytes:42,presence:'present'}];
+const quarantineMarkup=vm.runInContext('quarantineHTML(items)',quarantineContext);
+assert.match(quarantineMarkup,/記録 42/);assert.match(quarantineMarkup,/実物なし/);assert.match(quarantineMarkup,/所在・容量未確認/);
+assert.match(quarantineMarkup,/data-q-restore="missing" disabled/);assert.match(quarantineMarkup,/data-q-restore="unknown" disabled/);
 const elements={};for(const key of ['.close','#assistant-execute','#assistant-cancel','.assistant-live'])elements[key]={disabled:false};
 let calls=0,now=1000000;const timers=new Map();let serial=0;
 const dialog={open:false,querySelector:s=>elements[s],querySelectorAll:()=>Object.values(elements),showModal(){this.open=true;},close(){this.open=false;}};

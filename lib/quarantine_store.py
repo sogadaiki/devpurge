@@ -7,10 +7,12 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import time
 import uuid
 import render_care as care
 import quarantine_adapters as adapters
+import quarantine_git
 
 
 class Quarantine:
@@ -62,8 +64,14 @@ class Quarantine:
                 parts=Path(original).relative_to(self.s.home/'Desktop/development').parts
                 project=parts[1] if parts[0]=='.worktrees' else parts[0]
             except (ValueError,IndexError):project='その他の作業コピー'
+            presence='present';observed_size=size
+            try:os.lstat(stored)
+            except FileNotFoundError:
+                presence='missing';observed_size=0
+            except OSError:
+                presence='unknown';observed_size=None
             result.append({'id':'quarantine-'+key,'uuid':key,'qid':qid,'epoch':epoch,
-                'original':original,'path':stored,'bytes':size,'category':'intermediate',
+                'original':original,'path':stored,'bytes':observed_size,'recorded_bytes':size,'presence':presence,'category':'intermediate',
                 'title':qid+' / '+Path(original).name,'reason':reason,'kind':'quarantine',
                 'project':project,
                 'review_after':meta.get('review_after',epoch+30*86400),'status':meta.get('status','held')})
@@ -75,6 +83,8 @@ class Quarantine:
         return rows[0]
 
     def paths(self,row):
+        if row.get('presence')=='missing':raise ValueError('隔離先の実物がありません。記録上の容量は回収候補に加算しません')
+        if row.get('presence')=='unknown':raise ValueError('隔離先を読み取れません。容量は未確認として保持')
         original=self.s.physical(Path(row['original']))
         stored=self.s.physical(Path(row['path']))
         if not original.is_relative_to(self.s.home) or original.is_relative_to(self.root):
@@ -197,13 +207,22 @@ class Quarantine:
 
     def verify_contents(self,row,original,stored,folder,target,identity):
         kind=target.get('kind')
-        if kind not in ('verified_duplicate','regenerable_webpack_cache','obsolete_generated_build'):
+        if kind not in ('verified_duplicate','verified_duplicate_tree','regenerable_webpack_cache','obsolete_generated_build'):
             raise ValueError('隔離記録の再生成・保持元の検証形式に未対応のため保持')
         contents,allocated=self.content_map(stored)
         if contents!=target.get('contents'):raise ValueError('隔離時のファイル内容と一致しないため保持')
         retained={}
         plan=self.read_json(folder/'execution-plan.json')
-        if kind=='verified_duplicate' and stored.is_file():
+        if kind=='verified_duplicate_tree' and stored.is_dir():
+            anchors=target.get('retained_files',{})
+            if not contents or set(anchors)!=set(contents):raise ValueError('全ファイルの保持元が揃っていないため保持')
+            probed_parents=set()
+            for name,item in contents.items():
+                anchor=anchors[name]
+                if anchor.get('sha256')!=item['sha256']:raise ValueError('保持元と隔離物の内容記録が一致しません')
+                retained[name]=adapters.retained_file(self,anchor.get('path',''),anchor,probed_parents)
+            reconstruction='全ファイルと同一内容の素材を保持。ファイルごとの保持先を監査記録に保存'
+        elif kind=='verified_duplicate' and stored.is_file():
             anchor=self.s.physical(Path(target.get('retained_path','')))
             if not anchor.is_relative_to(self.s.home) or anchor.is_relative_to(self.root) or anchor.is_relative_to(self.s.home/'.Trash'):
                 raise ValueError('残す原本の場所が不正です')
@@ -271,14 +290,16 @@ class Quarantine:
 
     def verify(self,row):
         row=self.entry(row['id'])
+        original,stored=self.paths(row)
         # Probe in a read-only child before touching protected project folders.
         self.s.directory(Path(row['original']).parent,1)
-        original,stored=self.paths(row)
         meta=self.catalog()['entries'].get(row['uuid'],{})
         if meta.get('review_after',0)>time.time():raise ValueError('保持期間を延長したため保持')
-        folder,target=self.binding(row)
         if (stored/'.git').exists() or (stored/'.git').is_symlink():
-            raise ValueError('Git作業コピーは専用のGit検証・削除が必要なため保持（通常の完全削除には含めません）')
+            try:reason=quarantine_git.inspect(self,row)['reason']
+            except (ValueError,OSError,subprocess.SubprocessError) as e:reason=str(e)
+            raise ValueError('Git作業コピー：'+reason+'（通常の完全削除には含めません）')
+        folder,target=self.binding(row)
         initial_identity=care.identity(stored)
         if target.get('adapter'):
             self.references(original.parent,stored)

@@ -32,13 +32,15 @@ def targets(plan,row):
     return found
 
 
-def retained_file(q,path,expected):
+def retained_file(q,path,expected,probed_parents=None):
     path=q.s.physical(Path(path))
     if not path.is_relative_to(q.s.home) or path.is_relative_to(q.root) or path.is_relative_to(q.s.home/'.Trash'):
         raise ValueError('保持元が原本の保存範囲外のため保持')
     if not isinstance(expected,dict) or not re.fullmatch(r'[a-f0-9]{64}',str(expected.get('sha256',''))):
         raise ValueError('保持元のハッシュ記録が不足しています')
-    q.s.directory(path.parent,1)
+    if probed_parents is None or path.parent not in probed_parents:
+        q.s.directory(path.parent,1)
+        if probed_parents is not None:probed_parents.add(path.parent)
     if q.hash_file(path)!=expected['sha256']:raise ValueError('保持元が記録時から変化したため保持')
     return {'path':str(path),'sha256':expected['sha256'],'identity':care.identity(path)}
 
