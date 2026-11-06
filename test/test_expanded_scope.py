@@ -71,7 +71,8 @@ printf '%s\\n' "${SCAN_RESULTS[@]}"
             guard.assert_called_once_with(('claude',))
         with self.assertRaises(ValueError):scope.evidence(self.s,private)
 
-    def test_unknown_app_symlink_and_nested_original_are_not_cache_authority(self):
+    @patch.object(scope,'process_guard')
+    def test_unknown_app_symlink_and_nested_original_are_not_cache_authority(self,guard):
         unknown=self.directory('Library/Application Support/Unknown/Partitions/p/Cache')
         original=self.directory('Library/Application Support/Claude/Partitions/p/files/Cache')
         for p in (unknown,original):

@@ -150,6 +150,7 @@ def manifest(studio, path):
 
 def evidence(studio, p):
     """Return evidence only for exact supported path grammars, never row labels."""
+    p=studio.physical(p)
     h=studio.home
     app=app_cache_owner(h,p)
     if app:
