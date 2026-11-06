@@ -48,6 +48,6 @@ macOS向けキャッシュ削除CLIツール。
 - `sudo devpurge` 時のみ system tier が有効化される（`DEVPURGE_IS_ROOT` フラグ）
 - root実行時は `SUDO_USER` のHOMEを解決してからライブラリを読み込む（パス展開順序が重要）
 - ホワイトリスト方式で削除対象を制限。system tier用の別ホワイトリストあり
-- sleepimage削除前に `pmset -a hibernatemode 0` を自動実行
+- sleepimage・swapはreviewのみ。メモリ状態を削除せず、休止設定も変更しない。Premiere/Media Encoderのモデル・codec、CEP拡張もreview。root用ホワイトリストのAdobe対象はInstallersだけに限定する。
 - **このMacはlaunchdで月・木09:00に `devpurge -y` を実行**（旧crontabから移行済み、週次triageは日08:30）→ defaultモードのターゲットは無人実行で安全であること。自動再DLされる項目（ChromeオンデバイスAIモデル、壁紙動画、AIモデル類）はcaution tierに置く（チャーン防止）
 - bash 3.2互換必須（macOS標準）。連想配列・mapfile禁止。空配列は `"${arr[@]+"${arr[@]}"}"` で展開

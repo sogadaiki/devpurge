@@ -124,7 +124,7 @@ devpurge --ai-only
 # Include everything (Notion, Discord, Slack, AI models, etc.)
 devpurge -a
 
-# System-level caches (sleepimage, diagnostics, Adobe system caches)
+# System-level scan (OS memory state and Adobe components remain review-only)
 sudo devpurge -n
 
 # Exclude specific paths (also skips everything under them)
@@ -247,7 +247,11 @@ Notion, Discord, Slack, Adobe Fonts/CoreSync, Filmora, Steam, Zoom, Chatwork, Te
 
 ### System (`sudo devpurge`)
 
-sleepimage (with automatic `hibernatemode 0`), system diagnostics logs, software update cache, Adobe system-level caches, iLife-era leftovers.
+System diagnostics logs, software update cache, installer caches and legacy
+support locations. Inspect the dry run before selecting targets: size alone
+does not prove they are disposable. Sleep recovery images, active swap files,
+Premiere/Media Encoder models and codecs, and installed CEP extensions are
+report-only. devpurge never changes hibernation settings or purges live memory.
 
 ## vs CleanMyMac / DevCleaner / npkill / kondo
 

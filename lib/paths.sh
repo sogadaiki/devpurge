@@ -116,20 +116,21 @@ DEVPURGE_REVIEW_PATHS=(
 
 # ── Tier 4: System (sudo devpurge only) ─────────────────────────────────────
 DEVPURGE_SYSTEM_PATHS=(
-  "S01|/private/var/vm/sleepimage|system|Sleep image (RAM snapshot)"
+  "S01|/private/var/vm/sleepimage|review|Sleep recovery image (macOS-managed; keep)"
   "S02|/private/var/root/.Trash|system|Root user Trash"
   "S03|/private/var/db/diagnostics|system|System diagnostics logs"
   "S04|/private/var/db/uuidtext|system|Diagnostics UUID text"
   "S05|/Library/Updates|system|Software update cache"
-  "S06|/Library/Application Support/Adobe/Premiere Pro|system|Adobe Premiere Pro cache"
-  "S07|/Library/Application Support/Adobe/Adobe Media Encoder|system|Adobe Media Encoder cache"
+  "S06|/Library/Application Support/Adobe/Premiere Pro|review|Premiere speech/AI models and components (keep)"
+  "S07|/Library/Application Support/Adobe/Adobe Media Encoder|review|Media Encoder models and codecs (keep)"
   "S08|/Library/Application Support/Adobe/Installers|system|Adobe old installers"
-  "S09|/Library/Application Support/Adobe/CEP|system|Adobe CEP extensions cache"
+  "S09|/Library/Application Support/Adobe/CEP|review|Installed Adobe CEP extensions (keep)"
   "S10|/Library/Application Support/GarageBand|system|GarageBand support data"
   "S11|/Library/Application Support/iPhoto|system|iPhoto legacy data"
   "S12|/Library/Application Support/iDVD|system|iDVD legacy data"
   "S13|/Library/Application Support/iWork '09|system|iWork '09 legacy data"
   "S14|/Library/Application Support/iLifeSlideshow|system|iLife slideshow legacy data"
+  "S15|/System/Volumes/VM|review|Active macOS swap files (OS-managed; never purge)"
 )
 
 # ── Whitelist: only these path prefixes are allowed for deletion ──────────────
@@ -156,12 +157,11 @@ DEVPURGE_WHITELIST=(
 
 # System-level paths allowed only when running as root
 DEVPURGE_SYSTEM_WHITELIST=(
-  "/private/var/vm/"
   "/private/var/root/"
   "/private/var/db/diagnostics"
   "/private/var/db/uuidtext"
   "/Library/Updates"
-  "/Library/Application Support/Adobe/"
+  "/Library/Application Support/Adobe/Installers/"
   "/Library/Application Support/GarageBand"
   "/Library/Application Support/iPhoto"
   "/Library/Application Support/iDVD"

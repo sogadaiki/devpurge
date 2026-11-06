@@ -331,11 +331,6 @@ devpurge_cleanup() {
       fi
     fi
 
-    # Special handling for sleepimage: disable hibernation first
-    if [[ "$id" == "S01" ]]; then
-      pmset -a hibernatemode 0 2>/dev/null
-    fi
-
     # Delete (or move to Trash with --trash; system tier always deletes)
     printf "  Deleting %-6s %s..." "$size_human" "$desc"
 
