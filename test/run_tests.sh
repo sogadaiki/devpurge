@@ -139,10 +139,27 @@ assert_exit_code "system /Library blocked when not root" 1 devpurge_path_allowed
 
 # System whitelist allowed when root
 DEVPURGE_IS_ROOT=1
-assert_exit_code "system paths allowed when root" 0 devpurge_path_allowed "/private/var/vm/sleepimage"
+assert_exit_code "sleep recovery stays protected even as root" 1 devpurge_path_allowed "/private/var/vm/sleepimage"
+assert_exit_code "swap files stay protected even as root" 1 devpurge_path_allowed "/System/Volumes/VM/swapfile0"
+assert_exit_code "Premiere models stay protected even as root" 1 devpurge_path_allowed "/Library/Application Support/Adobe/Premiere Pro/26.0/SpeechESL"
+assert_exit_code "Media Encoder codecs stay protected even as root" 1 devpurge_path_allowed "/Library/Application Support/Adobe/Adobe Media Encoder/26.0/OptionalCodecs"
+assert_exit_code "CEP extensions stay protected even as root" 1 devpurge_path_allowed "/Library/Application Support/Adobe/CEP/extensions"
+assert_exit_code "Adobe parent cannot bypass component guards" 1 devpurge_path_allowed "/Library/Application Support/Adobe"
+assert_exit_code "installer cache retains its narrow whitelist" 0 devpurge_path_allowed "/Library/Application Support/Adobe/Installers"
 assert_exit_code "system /Library allowed when root" 0 devpurge_path_allowed "/Library/Updates"
 assert_exit_code "system diagnostics allowed when root" 0 devpurge_path_allowed "/private/var/db/diagnostics"
 DEVPURGE_IS_ROOT=0
+
+for protected_system_id in S01 S06 S07 S09 S15; do
+  protected_system_tier=""
+  for protected_system_entry in "${DEVPURGE_SYSTEM_PATHS[@]}"; do
+    IFS='|' read -r protected_id protected_path protected_tier protected_desc <<< "$protected_system_entry"
+    if [[ "$protected_id" == "$protected_system_id" ]]; then
+      protected_system_tier="$protected_tier"
+    fi
+  done
+  assert_eq "$protected_system_id is report-only" "review" "$protected_system_tier"
+done
 
 # ══════════════════════════════════════════════════════════════════════════════
 printf "\n=== test_scan ===\n\n"
@@ -910,7 +927,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.8.1" "$version_output"
+assert_contains "version output" "devpurge 0.8.2" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)
