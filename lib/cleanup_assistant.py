@@ -197,7 +197,7 @@ class Assistant:
                 s.progress['total']=len(items)
                 for item in items.values():
                     if item.get('kind')=='quarantine':s.progress['message']='隔離記録と保持元を照合しています：'+item['qid']
-                    row = {k: item.get(k) for k in ('id', 'path', 'title', 'category', 'bytes', 'delta', 'reason','kind','original','qid','review_after')}
+                    row = {k: item.get(k) for k in ('id', 'path', 'title', 'category', 'bytes', 'delta', 'reason','kind','original','qid','review_after','presence','recorded_bytes')}
                     row.update(ready=False, local_verified=False)
                     # Only supported deletion grammars need expensive checks.
                     if item.get('action') in ('trash','expanded','quarantine') or (item.get('category') == 'build' and Path(item['path']).name in ('.next', '.open-next')):

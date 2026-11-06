@@ -180,7 +180,7 @@ _dp_scan_misc_caches() {
 # Auto-detect Electron/Chromium disk caches inside Application Support
 # (Cache, Code Cache, GPUCache, DawnCache variants - pure disk caches, safe)
 _dp_scan_electron_caches() {
-  local as_dir="${HOME}/Library/Application Support"
+  local as_dir="${1:-${HOME}/Library/Application Support}"
   [[ -d "$as_dir" ]] || return 0
 
   # Collect statically-targeted App Support paths to avoid double listing
@@ -222,6 +222,28 @@ _dp_scan_electron_caches() {
       _dp_add_result "$el_id" "$cache_path" "dev" "App cache: $(basename "$app_dir")/${cache_name}" "$size_kb"
 
       printf "\r  Scanning app caches: %-6s  %s" "$(bytes_to_human $((size_kb * 1024)))" "$(basename "$app_dir")"
+    done
+
+    # Partition stores also contain login/offline data. Discover only named
+    # disk-cache children of known Electron apps, and keep CLI runs review-only.
+    case "${app_dir##*/}" in
+      Claude|Code|Cursor|Slack|discord|Notion) ;;
+      *) continue ;;
+    esac
+    [[ ! -L "$app_dir" && ! -L "$app_dir/Partitions" ]] || continue
+    local partition
+    for partition in "$app_dir/Partitions"/*; do
+      [[ -d "$partition" && ! -L "$partition" ]] || continue
+      for cache_name in "Cache" "Code Cache" "GPUCache" "DawnCache" "DawnGraphiteCache" "DawnWebGPUCache"; do
+        cache_path="$partition/$cache_name"
+        [[ -d "$cache_path" && ! -L "$cache_path" ]] || continue
+        devpurge_is_excluded "$cache_path" && continue
+        size_kb=$(_dp_size_kb "$cache_path")
+        [[ -z "$size_kb" || "$size_kb" -lt 10240 ]] && continue
+        el_count=$((el_count + 1))
+        el_id=$(printf "E%02d" "$el_count")
+        _dp_add_result "$el_id" "$cache_path" "review" "Partition cache (close app and verify in Studio): ${app_dir##*/}/${partition##*/}/$cache_name" "$size_kb"
+      done
     done
   done
   return 0

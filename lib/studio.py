@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT / 'lib'))
 import job_recovery
 import cleanup_assistant
 import bounded_fs
+import expanded_scope
 
 
 def render_care_module():
@@ -288,7 +289,7 @@ class Studio:
         return [(self.home / p, cat, title, reason, action) for p, cat, title, reason, action in specs]
 
     def discover(self):
-        found = self.targets()
+        found = self.targets()+expanded_scope.application_specs(self)
         base = self.home / 'Desktop/development'
         # Bounded name-only discovery; never enter secrets, Git or generated roots.
         count = 0

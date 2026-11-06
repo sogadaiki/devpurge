@@ -40,11 +40,12 @@ def build(app, root, python):
     shutil.copy2(root / 'lib/expanded_scope.py', engine / 'lib/expanded_scope.py')
     shutil.copy2(root / 'lib/quarantine_store.py', engine / 'lib/quarantine_store.py')
     shutil.copy2(root / 'lib/quarantine_adapters.py', engine / 'lib/quarantine_adapters.py')
+    shutil.copy2(root / 'lib/quarantine_git.py', engine / 'lib/quarantine_git.py')
     shutil.copy2(root / 'lib/bounded_fs.py', engine / 'lib/bounded_fs.py')
     shutil.copytree(root / 'ui', engine / 'ui')
     info = {'CFBundleName': 'devpurge Studio', 'CFBundleDisplayName': 'devpurge Studio',
             'CFBundleIdentifier': BUNDLE_ID, 'CFBundleVersion': '3',
-            'CFBundleShortVersionString': '0.19.0', 'CFBundleExecutable': 'studio',
+            'CFBundleShortVersionString': '0.20.0', 'CFBundleExecutable': 'studio',
             'CFBundlePackageType': 'APPL', 'LSMinimumSystemVersion': '12.0',
             'CFBundleIconFile': 'engine/ui/assets/companion.png',
             'NSHighResolutionCapable': True, 'NSPrincipalClass': 'NSApplication',

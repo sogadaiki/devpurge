@@ -7,6 +7,11 @@ local checks verify, and you review exact targets before permanently reclaiming
 regenerable caches/builds. Actual freed space and retained reasons are shown.
 No new schedule. See [AI cleanup assistant](docs/cleanup-assistant.md).
 
+Studio 0.20 also finds known Electron partition caches and installer/update
+stores, distinguishes missing quarantine records, and verifies retained copies
+file by file. CLI partition caches remain review-only. See
+[System Data investigation and recovery](docs/system-data-recovery.md).
+
 **Render care:** Studio's 「レンダリングの片付け」 and `devpurge render-care`
 reclaim identical Remotion temporary copies after original-file and activity
 checks, with Codex classification and actual free-space readback. Optional

@@ -1,5 +1,6 @@
 """Disposable project quarantine; never touch the real user's data."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import studio
 import quarantine_store as qs
 import cleanup_assistant
 import quarantine_adapters as qa
+import quarantine_git as qg
 
 
 class QuarantineTests(unittest.TestCase):
@@ -40,6 +42,85 @@ class QuarantineTests(unittest.TestCase):
 
     def test_verified_build_is_not_deleted_by_inspection(self):
         self.assertEqual(self.q.verify(self.row)['kind'],'quarantine');self.assertTrue(self.stored.exists())
+
+    def test_missing_quarantine_is_visible_without_claiming_reclaimable_bytes(self):
+        (self.stored/'generated').unlink();self.stored.rmdir()
+        row=self.q.entries()[0]
+        self.assertEqual(row['presence'],'missing');self.assertEqual(row['bytes'],0)
+        self.assertEqual(row['recorded_bytes'],4096)
+        with self.assertRaisesRegex(ValueError,'実物がありません'):self.q.verify(row)
+        self.assertIn('Q100',(self.q.root/'manifest.tsv').read_text())
+
+    def duplicate_tree(self):
+        self.anchor=self.project/'source.jpg';self.anchor.write_text('compiled fixture')
+        self.target={'path':str(self.original),'kind':'verified_duplicate_tree',
+            'contents':self.q.content_map(self.stored)[0],
+            'retained_files':{'generated':{'path':str(self.anchor),'sha256':self.q.hash_file(self.anchor)}}}
+        qs.care.save(self.folder/'execution-plan.json',{'targets':[self.target]})
+
+    def test_duplicate_tree_revalidates_every_retained_file(self):
+        self.duplicate_tree();self.assertEqual(self.q.verify(self.row)['kind'],'quarantine')
+        self.anchor.write_text('different')
+        with self.assertRaisesRegex(ValueError,'保持元が記録時'):self.q.verify(self.row)
+
+    def test_duplicate_tree_extra_file_or_quarantined_keeper_cannot_pass(self):
+        self.duplicate_tree();(self.stored/'unique').write_text('unique')
+        with self.assertRaisesRegex(ValueError,'一致しない'):self.q.verify(self.row)
+        (self.stored/'unique').unlink()
+        self.target['retained_files']['generated']['path']=str(self.stored/'generated')
+        qs.care.save(self.folder/'execution-plan.json',{'targets':[self.target]})
+        with self.assertRaisesRegex(ValueError,'保存範囲外'):self.q.verify(self.row)
+
+    def git_fixture(self):
+        qg.git(self.project,'config','user.email','fixture@example.invalid');qg.git(self.project,'config','user.name','Fixture')
+        (self.project/'source.py').write_text('print(1)\n')
+        (self.project/'.gitignore').write_text('.next/\n__pycache__/\nprivate/\n')
+        qg.git(self.project,'add','.');qg.git(self.project,'commit','-qm','Fixture')
+        qg.git(self.project,'update-ref','refs/remotes/origin/main','HEAD')
+        stored=self.q.root/'Q101-checkout'
+        qg.git(self.project,'worktree','add','-qb','fixture',str(stored))
+        bundle=self.folder/'recovery.bundle';qg.git(self.project,'bundle','create',str(bundle),'fixture')
+        target={'path':str(self.project/'checkout'),'state':{'head':qg.git(stored,'rev-parse','HEAD').decode().strip(),'branch':'refs/heads/fixture'},
+            'bundle':{'path':str(bundle),'sha256':self.q.hash_file(bundle)}}
+        self.adapter_record(self.project/'checkout',stored,{'targets':[target]})
+
+    def test_git_review_verifies_content_but_never_grants_generic_delete(self):
+        self.git_fixture();e=qg.inspect(self.q,self.row)
+        self.assertEqual(e['status'],'verified-review-only');self.assertEqual(e['tracked_files'],4)
+        with self.assertRaisesRegex(ValueError,'通常の完全削除には含めません'):self.q.verify(self.row)
+        self.assertTrue(self.stored.exists())
+
+    def test_git_review_holds_unique_ignored_files(self):
+        self.git_fixture();(self.stored/'private').mkdir();(self.stored/'private/save').write_text('unique')
+        with self.assertRaisesRegex(ValueError,'管理外の固有'):qg.inspect(self.q,self.row)
+
+    def test_git_review_holds_assume_unchanged_and_changed_bundle(self):
+        self.git_fixture();qg.git(self.stored,'update-index','--assume-unchanged','source.py')
+        (self.stored/'source.py').write_text('unrecorded')
+        with self.assertRaisesRegex(ValueError,'変更検知を省略'):qg.inspect(self.q,self.row)
+        (self.folder/'recovery.bundle').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError,'bundleの内容'):qg.inspect(self.q,self.row)
+
+    def test_git_review_holds_protected_tracked_names_without_reading_them(self):
+        self.git_fixture();(self.stored/'契約書.md').write_text('fixture')
+        qg.git(self.stored,'add','.');qg.git(self.stored,'commit','-qm','Protected fixture')
+        qg.git(self.project,'update-ref','refs/remotes/origin/main','fixture')
+        qg.git(self.project,'bundle','create',str(self.folder/'recovery.bundle'),'fixture')
+        plan=self.q.read_json(self.folder/'execution-plan.json')
+        plan['targets'][0]['state']['head']=qg.git(self.stored,'rev-parse','HEAD').decode().strip()
+        plan['targets'][0]['bundle']['sha256']=self.q.hash_file(self.folder/'recovery.bundle')
+        qs.care.save(self.folder/'execution-plan.json',plan)
+        with self.assertRaisesRegex(ValueError,'保護・機密'):qg.inspect(self.q,self.row)
+
+    def test_unreadable_quarantine_is_unknown_not_missing(self):
+        real=os.lstat
+        def guarded(path,*args,**kwargs):
+            if str(path)==str(self.stored):raise PermissionError('fixture')
+            return real(path,*args,**kwargs)
+        with patch('quarantine_store.os.lstat',side_effect=guarded):
+            row=self.q.entries()[0]
+            with self.assertRaisesRegex(ValueError,'読み取れません'):self.q.verify(row)
+        self.assertEqual(row['presence'],'unknown');self.assertIsNone(row['bytes'])
 
     def test_unknown_provenance_format_is_not_reported_as_content_mismatch(self):
         self.target={'path':str(self.original),'contents':{'.':{'size':12,'sha256':'unknown'}}}
