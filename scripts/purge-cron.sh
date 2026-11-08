@@ -7,7 +7,7 @@
 # 削除したworktreeの復元情報は logs/removed-worktrees-*.tsv に残る。
 set -uo pipefail
 
-export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # ~/Library/Logs は devpurge 自身の掃除対象(D22)なので、ログはApp Support側に置く
 LOG_DIR="${HOME}/Library/Application Support/devpurge/logs"
 mkdir -p "$LOG_DIR"
