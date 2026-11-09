@@ -409,6 +409,17 @@ devpurge_scan() {
   fi
 
   # Report-only review targets
+  if [[ "$mode" != "ai" && "${DEVPURGE_IS_ROOT:-0}" != "1" && "${DEVPURGE_SKIP_BUILD_CARE:-}" != "1" ]]; then
+    local build_copy_row
+    local build_copy_args=(scan --rows)
+    local build_copy_exclude
+    for build_copy_exclude in "${DEVPURGE_EXCLUDES[@]+"${DEVPURGE_EXCLUDES[@]}"}"; do
+      build_copy_args+=(--exclude "$build_copy_exclude")
+    done
+    while IFS= read -r build_copy_row; do
+      [[ -z "$build_copy_row" ]] || SCAN_RESULTS+=("$build_copy_row")
+    done < <(python3 "${DEVPURGE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/lib/build_care.py" "${build_copy_args[@]}")
+  fi
   if [[ "$mode" != "ai" && "${DEVPURGE_SKIP_REVIEW:-}" != "1" ]]; then
     _dp_scan_review_targets
     printf "\r%-80s\r" " "

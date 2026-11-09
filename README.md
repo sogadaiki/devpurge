@@ -1,5 +1,11 @@
 # devpurge
 
+**Completed-build care (CLI0.9):** register build output roots to verify old
+IPA/PCK/framework copies and generated imports. Preserve newest2 plus pinned
+releases and every IPA/signed archive/source. Permanent automatic cleanup is
+explicit opt-in, reused by existing unattended runs and post-build hooks.
+See [build retention and proof rules](docs/build-care.md).
+
 ## Storage Studio
 
 **AI cleanup assistant:** The app opens at 「AIで片付ける」. Codex proposes,
