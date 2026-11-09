@@ -60,7 +60,14 @@ _dp_ignored_unique() {
   fi
   while IFS= read -r -d '' path; do
     # Secrets stay protected even when nested inside otherwise generated dirs.
-    case "${path##*/}" in .env*) found="$path"; break ;; esac
+    case "${path##*/}" in .env*|export_credentials.cfg) found="$path"; break ;; esac
+    # A generated parent does not make release originals or recovery inputs
+    # regenerable. Build-care verifies duplicate copies separately; generic
+    # worktree removal must preserve these without reading their contents.
+    case "$path" in
+      *.ipa|*.pck|*.xcarchive/*|*.dSYM/*|tracked-source.tar|*/tracked-source.tar|source.tar|*/source.tar|*/source-final/*|*/source/project.godot|*/source/godot-r1/project.godot|*/device-save-*/*|*/save-data-preserved-*/*|*.sqlite|*.sqlite3|*.db)
+        found="$path"; break ;;
+    esac
     [[ "$path" =~ $generated_dirs ]] && continue
     [[ "$path" =~ (^|/)supabase/\.temp(/|$) ]] && continue
     [[ "$path" =~ $generated_files ]] && continue

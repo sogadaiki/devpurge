@@ -41,7 +41,7 @@ macOS向けキャッシュ削除CLIツール。
 - **アーカイブの読み取り専用モードは台帳も変更しない**: `archive --dry-run` / `--json` / 全体`-n`。登録は `archive --track`、再利用前の期限延長は `archive --touch <path>`。通常実行は新着登録と期限切れ整理を行う。`--ai-only` / `sudo` ではアーカイブ整理しない。共有スキルは `skills/archive-cleanup/SKILL.md`、仕様は `docs/archive-retention.md`
 - **worktreeはrm -rf禁止**。`git worktree remove`（--force無し）のみ。dirty/lockedはgitが拒否する
 - **無人実行(-y)ではworktree削除をスキップ**（gitignoreされた.env等はclean判定に出ないため）。rc `worktree_auto=1` か env `DEVPURGE_WORKTREE_AUTO=1` でopt-in。`.env*`を含むworktree、再生成不能なignoredファイルを持つworktree、未マージかつ未push/detachedのworktreeはreview行き。削除直前にも再判定する。7日はHEADコミット日時で判定し、origin退避判定はローカルremote-tracking refを使用
-- **再生成可能物**: `.open-next`、`.godot`、`*.tsbuildinfo`、`next-env.d.ts`、`.refresh.lock` を含む。ignored一覧取得失敗はreview。worktree間の旧版重複は同じGit common-dir・相対パス・内容の場合だけ集約
+- **再生成可能物**: `.open-next`、`.godot`、`*.tsbuildinfo`、`next-env.d.ts`、`.refresh.lock` を含む。ただし配下のIPA/PCK・Archive/dSYM・ソースsnapshot・端末セーブ控え・ローカルDB・Godot export credentialsは保持しworktreeをreviewへ送る。重複ビルドの整理は別のbuild-care検証で行う。ignored一覧取得失敗はreview。worktree間の旧版重複は同じGit common-dir・相対パス・内容の場合だけ集約
 - **worktreeログは試行と成功を区別**: 削除前の `removed-worktrees-*.tsv` は復元用、結果の `worktree-removal-results-*.tsv` は週次成功集計用
 - **worktree復元ログに記録されたブランチはブランチ自動整理からも保護**（同じ実行内・次回以降とも保持）
 - **定期ジョブのログは `~/Library/Application Support/devpurge/logs/`**。`~/Library/Logs` はD22で自分自身が消すため置かない
