@@ -14,6 +14,8 @@ macOS向けキャッシュ削除CLIツール。
 
 ## Architecture
 
+- `lib/build_care.py` — 登録したiOSビルド出力の重複防止。最新2＋固定版＋保持元を保護、IPA/署名済みArchive/ソースは保持。完全一致と入力/利用状況を再検証した旧コピー・指定生成物だけをopt-inで整理。通常スキャンはreviewのみ、`-y`とビルド成功後hookで有効化済み方針を実行。新しい定期ジョブなし。詳細 `docs/build-care.md`。
+
 - `bin/devpurge` — エントリポイント（フラグ解析、フェーズ制御）
 - `lib/paths.sh` — ターゲット定義（tier: ai / dev / caution / system + review + ホワイトリスト）
 - `lib/scan.sh` — スキャン（静的 + node_modules/.next動的 + misc/Electron/Containerキャッシュ自動検出 + review）

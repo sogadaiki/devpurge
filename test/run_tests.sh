@@ -64,6 +64,7 @@ export DEVPURGE_SKIP_REVIEW=1
 export DEVPURGE_SKIP_BRANCHES=1
 export DEVPURGE_SKIP_DUPES=1
 export DEVPURGE_SKIP_ARCHIVE=1
+export DEVPURGE_SKIP_BUILD_CARE=1
 source "${PROJECT_DIR}/lib/utils.sh"
 source "${PROJECT_DIR}/lib/config.sh"
 source "${PROJECT_DIR}/lib/paths.sh"
@@ -927,7 +928,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.8.2" "$version_output"
+assert_contains "version output" "devpurge 0.9.0" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)

@@ -16,6 +16,11 @@ while [[ -L "$DEVPURGE_SCRIPT" ]]; do
 done
 DEVPURGE_DIR="$(cd "$(dirname "$DEVPURGE_SCRIPT")/.." && pwd)"
 
+if [[ "${1:-}" == "build-care" ]]; then
+  shift
+  exec python3 "${DEVPURGE_DIR}/lib/build_care.py" "$@"
+fi
+
 if [[ "${1:-}" == "job-recovery" ]]; then
   shift
   exec python3 "${DEVPURGE_DIR}/lib/job_recovery.py" "$@"
@@ -92,6 +97,9 @@ USAGE
   devpurge [OPTIONS]
   devpurge studio                     Open the local storage dashboard
   devpurge diagnose                   Read-only storage diagnosis as JSON
+  devpurge build-care scan            Verify old iOS build copies (no deletion)
+  devpurge build-care configure --help Register exact roots and retention policy
+  devpurge build-care run             Run only an explicitly enabled policy
   devpurge render-care scan           Measure Remotion temp growth (no deletion)
   devpurge render-care review         Verify retained originals and ask Codex
   devpurge render-care apply          Reclaim verified copies permanently
@@ -298,6 +306,16 @@ fi
 
 # Read-only modes never create/update archive state. Ordinary scheduled runs
 # register arrivals even when no old files/caches are eligible yet.
+if [[ $OPT_YES -eq 1 && $OPT_DRY_RUN -eq 0 && $OPT_JSON -eq 0 && "$scan_mode" != "ai" && "$DEVPURGE_IS_ROOT" != "1" && "${DEVPURGE_SKIP_BUILD_CARE:-}" != "1" ]]; then
+  # Existing unattended jobs reuse the exact opt-in policy; no new scheduler.
+  build_care_args=(run)
+  for build_care_exclude in "${DEVPURGE_EXCLUDES[@]+"${DEVPURGE_EXCLUDES[@]}"}"; do
+    build_care_args+=(--exclude "$build_care_exclude")
+  done
+  if ! python3 "${DEVPURGE_DIR}/lib/build_care.py" "${build_care_args[@]}"; then
+    dp_warn "Build copies retained: verification or policy failed"
+  fi
+fi
 if [[ $OPT_DRY_RUN -eq 0 && $OPT_JSON -eq 0 && "$scan_mode" != "ai" ]]; then
   if ! devpurge_archive_observe; then
     export DEVPURGE_SKIP_ARCHIVE=1
