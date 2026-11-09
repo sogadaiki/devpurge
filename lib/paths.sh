@@ -39,7 +39,7 @@ DEVPURGE_PATHS+=(
   "D12|${HOME}/.cache/go-build|dev|Go build cache"
   "D13|${HOME}/.cache/pip|dev|pip cache (Linux-style)"
   "D14|${HOME}/Library/Developer/Xcode/Archives|review|Xcode archives (release artifacts)"
-  "D15|${HOME}/.cache/chrome-devtools-mcp|dev|Chrome DevTools MCP cache"
+  "D15|${HOME}/.cache/chrome-devtools-mcp|review|Chrome DevTools MCP browser profile (logins and settings)"
   "D16|${HOME}/Library/Application Support/Adobe/Common/Media Cache Files|dev|Adobe media cache"
   "D17|${HOME}/Library/Caches/Adobe|dev|Adobe app caches"
   "D18|${HOME}/Library/Application Support/Google/Chrome/Default/Service Worker|review|Chrome Service Workers (offline app data)"
@@ -173,6 +173,11 @@ DEVPURGE_SYSTEM_WHITELIST=(
 # Returns 0 if allowed, 1 if not
 devpurge_path_allowed() {
   local target="$1"
+  # This location contains chrome-profile, not just downloaded browser files.
+  # Deny stale/misclassified rows even though the broader .cache prefix is allowed.
+  case "$target" in
+    "${HOME}/.cache/chrome-devtools-mcp"|"${HOME}/.cache/chrome-devtools-mcp/"*) return 1 ;;
+  esac
   local prefix
   for prefix in "${DEVPURGE_WHITELIST[@]}"; do
     # Match both "prefix*" and exact "prefix" (without trailing slash)
