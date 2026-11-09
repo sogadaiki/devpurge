@@ -737,6 +737,40 @@ assert_eq "build output and non-ASCII .DS_Store are regenerable" "" "$ig_unique"
 echo "unique data" > "${IG_TMP}/wt-ig/localdata.sqlite"
 assert_eq "generated files do not mask unique data" "localdata.sqlite" "$(_dp_ignored_unique "${IG_TMP}/wt-ig")"
 rm -f "${IG_TMP}/wt-ig/localdata.sqlite"
+# Release/recovery material remains unique even inside ignored build/cache
+# parents. Empty fixtures only; the classifier must not read their contents.
+printf "build/\n" >> "$(git -C "${IG_TMP}/wt-ig" rev-parse --git-common-dir)/info/exclude"
+for protected_relative in \
+  build/old/export/RentalLegend.ipa \
+  build/old/RentalLegend.pck \
+  build/old/RentalLegend.xcarchive/Products/app \
+  build/old/RentalLegend.dSYM/Contents/symbols \
+  build/old/tracked-source.tar \
+  build/old/source.tar \
+  build/old/source-final/godot-r1/main.gd \
+  build/heat/source/godot-r1/project.godot \
+  build/device-save-backup-1/save.json \
+  build/save-data-preserved-1/state.json \
+  build/state.sqlite \
+  build/state.sqlite3 \
+  build/state.db \
+  godot/.godot/export_credentials.cfg; do
+  mkdir -p "${IG_TMP}/wt-ig/$(dirname "$protected_relative")"
+  touch "${IG_TMP}/wt-ig/$protected_relative"
+  assert_eq "protected input under generated parent: $protected_relative" "$protected_relative" "$(_dp_ignored_unique "${IG_TMP}/wt-ig")"
+  if [[ "$protected_relative" == *.ipa ]]; then
+    SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+    _dp_scan_repo_worktrees "${IG_TMP}/repo" >/dev/null
+    assert_eq "merged clean worktree with an IPA stays in review" "0" "${#DEVPURGE_WT_ROOTS[@]}"
+    if _dp_worktree_removal_ready "${IG_TMP}/wt-ig" "${IG_TMP}/repo"; then
+      assert_eq "delete-time check retains release originals" "held" "eligible"
+    else
+      assert_eq "delete-time check retains release originals" "held" "held"
+    fi
+  fi
+  rm -f "${IG_TMP}/wt-ig/$protected_relative"
+done
+assert_eq "empty preserved directories do not block ordinary caches" "" "$(_dp_ignored_unique "${IG_TMP}/wt-ig")"
 # Empty fixture only: no real credentials are read or copied.
 touch "${IG_TMP}/wt-ig/apps/web/.open-next/.build/.env.fixture"
 assert_contains "deeply nested ignored env file remains protected" '.env.fixture' "$(_dp_ignored_unique "${IG_TMP}/wt-ig")"
