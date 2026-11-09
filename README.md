@@ -18,6 +18,8 @@ stores, distinguishes missing quarantine records, and verifies retained copies
 file by file. CLI partition caches remain review-only. See
 [System Data investigation and recovery](docs/system-data-recovery.md).
 
+CLI 0.9.1 preserves `.cache/chrome-devtools-mcp`: it contains a persistent browser profile with login state and settings. It is report-only and denied by the deletion whitelist, including stale rows marked as caches.
+
 **Render care:** Studio's 「レンダリングの片付け」 and `devpurge render-care`
 reclaim identical Remotion temporary copies after original-file and activity
 checks, with Codex classification and actual free-space readback. Optional

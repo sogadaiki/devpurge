@@ -124,6 +124,19 @@ assert_exit_code "whitelist allows Library/Caches" 0 devpurge_path_allowed "${HO
 assert_exit_code "whitelist allows .cache" 0 devpurge_path_allowed "${HOME}/.cache/test"
 assert_exit_code "whitelist allows .npm" 0 devpurge_path_allowed "${HOME}/.npm/test"
 
+# These are string-only checks: never inspect or mutate the real browser profile.
+assert_exit_code "MCP browser store is protected" 1 devpurge_path_allowed "${HOME}/.cache/chrome-devtools-mcp"
+assert_exit_code "MCP browser store trailing slash is protected" 1 devpurge_path_allowed "${HOME}/.cache/chrome-devtools-mcp/"
+assert_exit_code "MCP profile remains protected under allowed cache prefix" 1 devpurge_path_allowed "${HOME}/.cache/chrome-devtools-mcp/chrome-profile"
+assert_exit_code "MCP profile descendants remain protected" 1 devpurge_path_allowed "${HOME}/.cache/chrome-devtools-mcp/chrome-profile/Default/Cookies"
+assert_exit_code "MCP profile guard does not block neighboring caches" 0 devpurge_path_allowed "${HOME}/.cache/chrome-devtools-mcp-other"
+mcp_profile_tier=""
+for mcp_profile_entry in "${DEVPURGE_PATHS[@]}"; do
+  IFS='|' read -r mcp_profile_id mcp_profile_path mcp_profile_level mcp_profile_desc <<< "$mcp_profile_entry"
+  [[ "$mcp_profile_id" != D15 ]] || mcp_profile_tier="$mcp_profile_level"
+done
+assert_eq "MCP browser profile is report-only" "review" "$mcp_profile_tier"
+
 # Whitelist allows node_modules under $HOME
 assert_exit_code "whitelist allows node_modules" 0 devpurge_path_allowed "${HOME}/Desktop/myproject/node_modules"
 assert_exit_code "whitelist allows nested node_modules" 0 devpurge_path_allowed "${HOME}/Documents/work/app/node_modules"
@@ -140,6 +153,7 @@ assert_exit_code "system /Library blocked when not root" 1 devpurge_path_allowed
 
 # System whitelist allowed when root
 DEVPURGE_IS_ROOT=1
+assert_exit_code "MCP browser profile stays protected even as root" 1 devpurge_path_allowed "${HOME}/.cache/chrome-devtools-mcp/chrome-profile"
 assert_exit_code "sleep recovery stays protected even as root" 1 devpurge_path_allowed "/private/var/vm/sleepimage"
 assert_exit_code "swap files stay protected even as root" 1 devpurge_path_allowed "/System/Volumes/VM/swapfile0"
 assert_exit_code "Premiere models stay protected even as root" 1 devpurge_path_allowed "/Library/Application Support/Adobe/Premiere Pro/26.0/SpeechESL"
@@ -962,7 +976,7 @@ printf "\n=== test_cli ===\n\n"
 
 # --version
 version_output=$("${PROJECT_DIR}/bin/devpurge" --version 2>&1)
-assert_contains "version output" "devpurge 0.9.0" "$version_output"
+assert_contains "version output" "devpurge 0.9.1" "$version_output"
 
 # --help
 help_output=$("${PROJECT_DIR}/bin/devpurge" --help 2>&1)

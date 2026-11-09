@@ -37,6 +37,7 @@ macOS向けキャッシュ削除CLIツール。
 
 - **スキャン結果は7フィールド**: `ID|PATH|TIER|DESC|SIZE_HUMAN|SIZE_BYTES|META`（METAはworktreeの `remove:<repo>` / `prune:<repo>`）
 - **review tierは構造的に削除不可**（cleanup冒頭でtier判定して拒否。Downloads・セッション履歴・未push/dirty/一点物ありworktree等）
+- **Chrome DevTools MCPの保存領域は保持**: `~/.cache/chrome-devtools-mcp` はブラウザのプロファイル・ログイン状態を含むためreview。古いdev分類の行でもホワイトリストで親・子パスを拒否する。
 - **archive tierは明示opt-in限定**: `archive_root=` と `archive_auto=1` の指定が必要。このMacでは `~/Desktop/アーカイブ`、10日未使用をユーザーが承認済み。対象リストごとの再承認や30日quarantine追加は不要。証拠等の保護パターン、除外、`.env*`、`.git`、`.devpurge-keep`、リンク、使用中データは保持。移動日の推測やmtimeだけの削除は禁止。日数は初回観測と利用/変更の台帳で管理し、既存ファイルは登録日から数える
 - **アーカイブの読み取り専用モードは台帳も変更しない**: `archive --dry-run` / `--json` / 全体`-n`。登録は `archive --track`、再利用前の期限延長は `archive --touch <path>`。通常実行は新着登録と期限切れ整理を行う。`--ai-only` / `sudo` ではアーカイブ整理しない。共有スキルは `skills/archive-cleanup/SKILL.md`、仕様は `docs/archive-retention.md`
 - **worktreeはrm -rf禁止**。`git worktree remove`（--force無し）のみ。dirty/lockedはgitが拒否する
