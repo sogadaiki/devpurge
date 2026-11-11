@@ -40,6 +40,16 @@ class TriageReportTest(unittest.TestCase):
         self.assertIn("期限切れ・7日以内: Q001", result)
         self.assertLessEqual(len(result), 1800)
 
+    def test_entries_past_the_grace_period_point_to_purge(self):
+        (self.root / "quarantine.txt").write_text(
+            "  devpurge quarantine (review after 30 days; no automatic deletion)\n"
+            "  Q001  1G  31d  REVIEW  /fixture\n  Q002  1G  25d  held  /fixture2\n  Q003  1G  2d  held  /fixture3\n")
+        result = report.render(self.root, now=1000000)
+        self.assertIn("猶予経過 1件: Q001", result)
+        self.assertIn("devpurge quarantine --purge", result)
+        self.assertIn("7日以内: Q002", result)
+        self.assertNotIn("Q003", result)
+
     def test_missing_quarantine_output_is_unknown(self):
         (self.root / "quarantine.txt").write_text("")
         self.assertIn("状態の確認が必要", report.render(self.root, now=1000000))

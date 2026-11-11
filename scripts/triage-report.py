@@ -47,13 +47,25 @@ def render(work_dir, now=None):
     lines += [f"**AI判定待ち** worktree・バックアップ {len(review)}件"] + top(review)
 
     quarantine = re.sub(r"\x1b\[[0-9;]*m", "", (root / "quarantine.txt").read_text())
-    expiry = re.search(r"expires after (\d+) days", quarantine)
+    # The list header changed from "expires after" to "review after" when
+    # expiry stopped deleting; without both, every report said "確認が必要".
+    expiry = re.search(r"(?:expires|review) after (\d+) days", quarantine)
     urgent = []
+    due = []
     for line in quarantine.splitlines():
-        match = re.match(r"\s*(Q\d+)\s+\S+\s+(\d+)d\s+(held|EXPIRED)\b", line)
-        if match and (match[3] == "EXPIRED" or (expiry and int(expiry[1]) - int(match[2]) <= 7)):
+        match = re.match(r"\s*(Q\d+)\s+\S+\s+(\d+)d\s+(held|EXPIRED|REVIEW)\b", line)
+        if not match:
+            continue
+        if match[3] == "REVIEW":
+            due.append(match[1])
+        elif match[3] == "EXPIRED" or (expiry and int(expiry[1]) - int(match[2]) <= 7):
             urgent.append(match[1])
-    if urgent:
+    if due:
+        deadline = (f"猶予経過 {len(due)}件: " + ", ".join(due[:10])
+                    + " → `devpurge quarantine --purge` で一覧を確認して削除（自動では消えません）")
+        if urgent:
+            deadline += " / 7日以内: " + ", ".join(urgent[:10])
+    elif urgent:
         deadline = "期限切れ・7日以内: " + ", ".join(urgent[:10])
     elif "Quarantine is empty." in quarantine:
         deadline = "隔離なし"

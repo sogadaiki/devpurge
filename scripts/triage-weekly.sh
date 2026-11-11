@@ -66,7 +66,7 @@ cat > "$PROMPT_FILE" <<'PROMPT'
 2. **即削除可能** (deletable=trueの合計GBと上位3件)
 3. **重複・旧バージョン** (descriptionが "identical copy of:" または "older version" のreview項目の件数・合計GBと上位3件。パスはホーム相対で短く)
 4. **AI判定待ち** (tier=reviewのworktree/バックアップ系で判定価値のあるもの上位3件。Downloads/Movies等の恒常項目は省く)
-5. **隔離の期限** (quarantine.txtでEXPIREDまたは残り7日以内のものがあれば警告)
+5. **隔離の期限** (quarantine.txtでStateがREVIEWのものは猶予経過。件数とIDを挙げ、`devpurge quarantine --purge` で本人が一覧を確認して削除するよう案内する。自動では消えない。heldで残り7日以内のものは予告する)
 6. **推奨アクション1行** (例:「対話セッションで /devpurge-triage 実行を推奨」or「今週は対応不要」)
 
 数字はscan.jsonの実データのみ使用。推測でサイズを書くな。
