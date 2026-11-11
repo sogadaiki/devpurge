@@ -141,6 +141,14 @@ _dp_classify_worktree() {
     return 0
   fi
 
+  # Quarantined worktrees keep their grace period and manifest record; their
+  # only exit is `quarantine --purge`, never the ordinary worktree tier.
+  if [[ -n "${DEVPURGE_QUARANTINE_DIR:-}" ]]; then
+    case "$wt" in
+      "$DEVPURGE_QUARANTINE_DIR"/*) return 0 ;;
+    esac
+  fi
+
   [[ -d "$wt" ]] || return 0
 
   local size_kb
@@ -202,10 +210,26 @@ _dp_classify_worktree() {
           squashed=1
         fi
 
+        # Opt-in (worktree_local_branch=1): a worktree never owns its branch.
+        # The ref lives in the main repo and survives removal, so a clean,
+        # idle worktree on a local-only branch loses nothing on this machine.
+        # Origin backup stays the default bar because it also covers disk
+        # loss; removal changes nothing about that either way.
+        local kept_local=0
+        if [[ "${DEVPURGE_WORKTREE_LOCAL:-0}" == "1" && "$pushed" -eq 0 && -n "$wt_branch" && "$wt_branch" != "HEAD" ]]; then
+          local local_head
+          local_head=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/${wt_branch}" 2>/dev/null || true)
+          [[ "$local_head" == "$wt_head" ]] && kept_local=1
+        fi
+
         if [[ "$pushed" -eq 1 && "$squashed" -eq 1 ]]; then
           merge_kind="squash-merged"
         elif [[ "$pushed" -eq 1 ]]; then
           merge_kind="unmerged, pushed"
+        elif [[ "$kept_local" -eq 1 && "$squashed" -eq 1 ]]; then
+          merge_kind="squash-merged, branch kept locally"
+        elif [[ "$kept_local" -eq 1 ]]; then
+          merge_kind="unmerged, branch kept locally"
         elif [[ "$squashed" -eq 1 ]]; then
           state="squash-merged (branch not pushed - review)"
         else

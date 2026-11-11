@@ -112,6 +112,11 @@ _dp_quarantine_add_locked() {
     dp_error "quarantine: move failed for $target"
     return 1
   fi
+  # A moved linked worktree looks prunable to its main repo; one prune later
+  # git can no longer say whether it was clean. Re-point the registration.
+  if [[ -f "$stored/.git" ]]; then
+    git -C "$stored" worktree repair >/dev/null 2>&1 || true
+  fi
 
   # Reason must not break TSV (tabs AND newlines)
   reason="${reason//$'\t'/ }"
@@ -200,6 +205,9 @@ _dp_quarantine_restore_locked() {
     fi
     mkdir -p "$(dirname "$orig")" || return 1
     if mv "$stored" "$orig" 2>/dev/null; then
+      if [[ -f "$orig/.git" ]]; then
+        git -C "$orig" worktree repair >/dev/null 2>&1 || true
+      fi
       _dp_manifest_drop "$want"
       dp_success "Restored ${qid} -> ${orig}"
       return 0

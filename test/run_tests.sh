@@ -687,6 +687,20 @@ q_dirty=$(q_add "${Q_TMP}/wt-dirty"); q_backdate "$q_dirty"
 q_pruned=$(q_add "${Q_TMP}/wt-pruned"); q_backdate "$q_pruned"
 rm -rf "${Q_TMP}/repo/.git/worktrees/wt-pruned"
 
+# quarantine re-points the git registration, so a later prune cannot orphan it
+q_registered=$(git -C "${Q_TMP}/repo" worktree list --porcelain | grep -c "^worktree .*/quarantine/${q_clean}-wt-clean$" || true)
+assert_eq "quarantine keeps a worktree registered at its stored path" "1" "$q_registered"
+q_prunable=$(git -C "${Q_TMP}/repo" worktree list --porcelain | grep -B3 "^prunable" | grep -c "wt-clean\|wt-dirty" || true)
+assert_eq "quarantined worktrees are not prunable" "0" "$q_prunable"
+
+# the ordinary worktree tier never takes a quarantined worktree
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+q_age_backup="$DEVPURGE_WORKTREE_AGE_DAYS"; DEVPURGE_WORKTREE_AGE_DAYS=0; DEVPURGE_WORKTREE_LOCAL=1
+_dp_scan_repo_worktrees "${Q_TMP}/repo" >/dev/null 2>&1 || true
+q_scanned=$(printf '%s\n' ${SCAN_RESULTS[@]+"${SCAN_RESULTS[@]}"} | grep -c "/quarantine/" || true)
+assert_eq "worktree scan leaves quarantined worktrees to --purge" "0" "$q_scanned"
+DEVPURGE_WORKTREE_AGE_DAYS="$q_age_backup"; DEVPURGE_WORKTREE_LOCAL=0
+
 assert_eq "purge: clean worktree is verified by git" "verified" "$(q_class "$q_clean")"
 assert_eq "purge holds a worktree with untracked work" "held" "$(q_class "$q_dirty")"
 assert_eq "purge: pruned worktree cannot be verified" "unverified" "$(q_class "$q_pruned")"
@@ -938,6 +952,26 @@ SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
 _dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
 pu_ahead=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|review|.*not pushed" || true)
 assert_eq "unpushed local commit demotes to review" "1" "$pu_ahead"
+
+# Opt-in: a clean worktree on a local-only branch is deletable (the ref stays)
+DEVPURGE_WORKTREE_LOCAL=1
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+pu_local=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|worktree|.*unmerged, branch kept locally, clean" || true)
+assert_eq "worktree_local_branch makes a clean local-only worktree deletable" "1" "$pu_local"
+echo 'in progress' > "${PU_TMP}/wt-pu/untracked.txt"
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+pu_local_dirty=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|review|.*dirty" || true)
+assert_eq "worktree_local_branch never overrides uncommitted work" "1" "$pu_local_dirty"
+rm -f "${PU_TMP}/wt-pu/untracked.txt"
+git -C "${PU_TMP}/wt-pu" checkout -q --detach
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+pu_local_detached=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|review|.*detached" || true)
+assert_eq "worktree_local_branch never covers a detached HEAD" "1" "$pu_local_detached"
+git -C "${PU_TMP}/wt-pu" checkout -q feat-pu
+DEVPURGE_WORKTREE_LOCAL=0
 git -C "${PU_TMP}/wt-pu" push -q origin feat-pu
 
 # Removal logs a restore record and keeps the branch
