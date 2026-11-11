@@ -9,6 +9,8 @@ DEVPURGE_EXCLUDES=()
 #   exclude=PATH             skip PATH (and everything under it)
 #   worktree_age_days=N      idle days before a merged worktree is deletable
 #   worktree_auto=1          allow worktree removal in unattended (-y) runs
+#   worktree_local_branch=1  also remove clean, idle worktrees whose branch is
+#                            not on origin (the local branch ref is kept)
 #   protect=SUBSTRING        never delete/quarantine paths containing SUBSTRING
 #   quarantine_days=N        days quarantined items are held before expiry
 devpurge_load_rc() {
@@ -38,6 +40,9 @@ devpurge_load_rc() {
         ;;
       worktree_auto=*)
         [[ "${line#worktree_auto=}" == "1" ]] && DEVPURGE_WORKTREE_AUTO=1
+        ;;
+      worktree_local_branch=*)
+        [[ "${line#worktree_local_branch=}" == "1" ]] && DEVPURGE_WORKTREE_LOCAL=1
         ;;
       protect=*)
         local pat="${line#protect=}"

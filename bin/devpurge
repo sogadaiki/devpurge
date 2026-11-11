@@ -109,6 +109,8 @@ USAGE
   devpurge quarantine --list            Show quarantined items
   devpurge quarantine --restore <ID>    Restore an item to its original path
   devpurge quarantine --expire          List items due for review (no deletion)
+  devpurge quarantine --purge           Review items past the grace period, then
+                                        delete the ones you confirm (-n to preview)
   devpurge archive --dry-run            Inspect the configured archive (read-only)
   devpurge archive --track              Register new files; never backdate arrival
   devpurge archive --touch <path>       Restart retention before reusing an archive
@@ -161,6 +163,8 @@ CONFIG (~/.devpurgerc)
   exclude=~/path            # skip path and everything under it
   worktree_age_days=7       # idle days before merged worktrees are deletable
   worktree_auto=1           # allow worktree removal in unattended (-y) runs
+  worktree_local_branch=1   # also remove clean, idle worktrees whose branch
+                            # is not on origin (the local branch is kept)
   protect=SUBSTRING         # never touch paths containing SUBSTRING
   quarantine_days=30        # grace period before quarantined items expire
   stale_days=90             # "not opened in N days" report threshold
@@ -206,6 +210,14 @@ if [[ "${1:-}" == "quarantine" ]]; then
       ;;
     --expire)
       devpurge_quarantine_expire
+      exit $?
+      ;;
+    --purge)
+      case "${2:-}" in
+        "") devpurge_quarantine_purge ;;
+        -n|--dry-run) devpurge_quarantine_purge dry ;;
+        *) dp_error "Usage: devpurge quarantine --purge [--dry-run]"; exit 1 ;;
+      esac
       exit $?
       ;;
     -*)

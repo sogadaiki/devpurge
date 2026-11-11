@@ -195,7 +195,7 @@ devpurge quarantine --list                                # see what's held
 devpurge quarantine --restore Q003                        # full undo
 ```
 
-Quarantined items retain their manifest and can be restored until the user confirms permanent deletion in Studio. `quarantine_days=N` (default 30) is a review reminder, not an automatic deletion deadline; even `quarantine --expire` only reports. Studio revalidates supported project audit proofs and includes verified copies in **AIで片付ける**. Unknown, changed, protected or active data stays held. See [project quarantine](docs/quarantine-disposal-design.md).
+Quarantined items retain their manifest and can be restored until the user confirms permanent deletion. `quarantine_days=N` (default 30) is a review reminder, not an automatic deletion deadline; even `quarantine --expire` only reports. `devpurge quarantine --purge` is the exit: it lists entries past the grace period and deletes only what you confirm at the terminal (`-n` previews; it refuses to run without a terminal, so unattended jobs cannot approve). Worktrees that git reports clean are removed with `git worktree remove`; copies git cannot vouch for are confirmed separately; anything holding `.env*`, local databases, release archives, protected names or uncommitted work stays held. Studio revalidates supported project audit proofs and includes verified copies in **AIで片付ける**. Unknown, changed, protected or active data stays held. See [project quarantine](docs/quarantine-disposal-design.md).
 
 ### Branch (v0.5.0)
 
