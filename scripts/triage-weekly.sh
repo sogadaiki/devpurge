@@ -43,6 +43,16 @@ if ! python3 -c 'import json,sys;json.load(open(sys.argv[1]))' "${WORK_DIR}/scan
   exit 1
 fi
 
+# Keep project output paths in a local report outside the AI and Discord inputs.
+PROJECT_REVIEW_DIR="$LOG_DIR"
+if [ "$DRY" = "1" ]; then
+  PROJECT_REVIEW_DIR="$WORK_DIR"
+fi
+if ! python3 "${SCRIPT_DIR}/../lib/project_storage_review.py" \
+     --scan-json "${WORK_DIR}/scan.json" --output "${PROJECT_REVIEW_DIR}/project-storage-review.json"; then
+  printf '%s local project storage review failed\n' "$(date '+%Y-%m-%d %H:%M')" >> "${LOG_DIR}/devpurge-triage.log"
+fi
+
 # quarantineの状態と、直近7日に自動削除したworktreeの復元情報も添える
 "$DEVPURGE_BIN" quarantine --list > "${WORK_DIR}/quarantine.txt" 2>/dev/null || true
 : > "${WORK_DIR}/removed-worktrees.tsv"
