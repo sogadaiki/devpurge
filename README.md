@@ -231,6 +231,8 @@ Three detectors live here (v0.5.0, reworked in v0.6.0):
 
 The optional weekly script (`scripts/triage-weekly.sh`) reports the scan, recent confirmed worktree removals and quarantine deadlines. When Claude authentication, quota or output fails, it falls back to a factual summary and labels AI analysis as unavailable. Neither path deletes or quarantines files. Test without posting with `DEVPURGE_TRIAGE_DRY=1 bash scripts/triage-weekly.sh`; the resulting draft is saved to `/tmp/devpurge-triage/report.md`. Runtime logs live in `~/Library/Application Support/devpurge/logs/`.
 
+The same weekly run saves a private `project-storage-review.json` in that log directory. It lists render workspaces, talkhead composites, generated trailer media, `state-before-*` rollback folders, and the existing game build review rows. It records whether a known render lock is in use and reports unreadable sizes as unknown. The report stays local and contains no cleanup actions. Run `python3 lib/project_storage_review.py` for a fresh local report.
+
 ### AI-Era
 
 Claude Desktop VM bundles, Claude Code CLI/plugin/debug caches, Codex CLI runtime cache, Gemini CLI temp sessions, Cursor, Codeium, Kiro, uv, Playwright, Puppeteer, Bun.
