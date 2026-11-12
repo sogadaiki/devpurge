@@ -9,6 +9,7 @@ import json
 import math
 import os
 from pathlib import Path
+import plistlib
 import stat
 import subprocess
 import sys
@@ -36,6 +37,29 @@ def fingerprint(s):
 def physical(path):
     if not path.is_absolute() or path.resolve() != path:
         raise ValueError('Nonphysical path: ' + str(path))
+
+
+def volume_uuid(path, path_stat):
+    if sys.platform != 'darwin':
+        return None
+    try:
+        mounted = subprocess.check_output(['/bin/df', '-P', str(path)], timeout=5,
+                                          stderr=subprocess.DEVNULL).splitlines()
+        device = Path(os.fsdecode(mounted[1].split()[0]))
+        if device.parent != Path('/dev'):
+            return None
+        node = device.lstat()
+        if not stat.S_ISBLK(node.st_mode) or node.st_rdev != path_stat.st_dev:
+            return None
+        info = plistlib.loads(subprocess.check_output(
+            ['/usr/sbin/diskutil', 'info', '-plist', str(device)], timeout=5, stderr=subprocess.DEVNULL))
+        if (not isinstance(info, dict) or info.get('DeviceNode') != str(device) or
+                identity(path.lstat()) != identity(path_stat)):
+            return None
+        value = info.get('VolumeUUID')
+        return str(uuid.UUID(value)) if isinstance(value, str) else None
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
 
 
 def opened_paths():
@@ -71,9 +95,10 @@ def spotlight_usage(root, days):
 
 class Archive:
     def __init__(self, home, root, state_dir, days=10, protect=(), exclude=(),
-                 clock=time.time, opens=opened_paths, usage=spotlight_usage):
+                 clock=time.time, opens=opened_paths, usage=spotlight_usage, volume=volume_uuid):
         self.home, self.root, self.state_dir = map(Path, (home, root, state_dir))
         self.days, self.clock, self.opens, self.usage = days, clock, opens, usage
+        self.volume = volume
         self.protect = tuple(PROTECTED) + tuple(protect)
         self.exclude = tuple(map(Path, exclude))
         if days < 1 or days > 3650:
@@ -149,8 +174,18 @@ class Archive:
         root_stat = self.root.lstat()
         if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.getuid():
             raise ValueError('Archive root must be a directory owned by the current user')
-        if state.get('root_identity') != identity(root_stat):
-            state['entries'] = {}  # A replacement root cannot inherit an old timer.
+        current_volume = self.volume(self.root, root_stat)
+        saved_volume = state.get('root_volume_uuid')
+        saved_root = state.get('root_identity')
+        if saved_volume and not current_volume:
+            raise ValueError('Cannot verify the archive volume; preserving the ledger')
+        prior_device = root_stat.st_dev
+        if (current_volume and current_volume == saved_volume and
+                isinstance(saved_root, list) and len(saved_root) == 2 and saved_root[1] == root_stat.st_ino):
+            # The same mounted volume can get a different st_dev after reboot.
+            prior_device = saved_root[0]
+        elif saved_root != identity(root_stat) or saved_volume:
+            state['entries'] = {}  # A replacement or unverified root cannot inherit an old timer.
         opened = {p for p in self.opens() if beneath(p, self.root)}
         used = self.usage(self.root, self.days)
         entries = {}
@@ -182,7 +217,7 @@ class Archive:
                         s.st_dev != root_stat.st_dev or s.st_uid != os.getuid() or getattr(s, 'st_flags', 0)):
                     report['protected'] += 1; continue
                 key = str(path.relative_to(self.root)); before = state['entries'].get(key)
-                new = before is None or before['identity'] != identity(s)
+                new = before is None or before['identity'] != [prior_device, s.st_ino]
                 changed = before is not None and before['fingerprint'] != fingerprint(s)
                 seen = now if new else before['seen']
                 last_use = max([used.get(path, 0)] + [used.get(p, 0) for p in path.parents if beneath(p, self.root)])
@@ -201,7 +236,8 @@ class Archive:
         report['eligible'].sort(key=lambda r: r['relative'])
         report['digest'] = hashlib.sha256(json.dumps(report['eligible'], sort_keys=True).encode()).hexdigest()
         report['eligible_bytes'] = sum(r['bytes'] for r in report['eligible'])
-        return report, dict(version=1, root=str(self.root), root_identity=identity(root_stat), entries=entries)
+        return report, dict(version=1, root=str(self.root), root_identity=identity(root_stat),
+                            root_volume_uuid=current_volume, entries=entries)
 
     def observe(self, touch=None):
         with self.lock():

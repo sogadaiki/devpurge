@@ -21,8 +21,10 @@ class Retention(unittest.TestCase):
         self.state = self.home / 'state'
         self.now = time.time() + 5
         self.opened = set(); self.used = {}
+        self.volume_uuid = 'b4dc4d04-e9b7-4c1f-a271-1f737a4de614'
         self.a = m.Archive(self.home, self.root, self.state, clock=lambda: self.now,
-                           opens=lambda: self.opened, usage=lambda *args: self.used)
+                           opens=lambda: self.opened, usage=lambda *args: self.used,
+                           volume=lambda *args: self.volume_uuid)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -35,6 +37,15 @@ class Retention(unittest.TestCase):
 
     def age(self):
         self.a.observe(); self.now += 10 * m.DAY
+
+    def change_saved_device(self, legacy=False):
+        state = self.a.load()
+        state['root_identity'][0] += 1
+        for record in state['entries'].values():
+            record['identity'][0] += 1
+        if legacy:
+            del state['root_volume_uuid']
+        self.a.save(state)
 
     def test_read_only_scan_never_creates_state_or_backdates_arrival(self):
         p = self.file()
@@ -54,6 +65,43 @@ class Retention(unittest.TestCase):
     def test_repeated_observation_does_not_extend_idle_files(self):
         self.file(); self.a.observe(); self.now += 9 * m.DAY; self.a.observe(); self.now += m.DAY
         self.assertEqual(self.a.expire()['removed'], 1)
+
+    def test_device_renumbering_preserves_observation_on_same_volume(self):
+        p = self.file(); q = self.file('changed.txt')
+        self.a.observe(); seen = self.now; self.now += 9 * m.DAY
+        self.change_saved_device(); q.write_bytes(b'changed while offline')
+        self.assertEqual(self.a.observe()['reasons'], {'within_retention': 1, 'changed': 1})
+        state = self.a.load()
+        self.assertEqual(state['entries'][p.name]['seen'], seen)
+        self.assertEqual(state['entries'][p.name]['identity'], m.identity(p.stat()))
+        self.now += m.DAY
+        self.assertEqual(self.a.expire()['removed'], 1)
+        self.assertFalse(p.exists()); self.assertTrue(q.exists())
+
+    def test_legacy_state_is_upgraded_if_device_did_not_change(self):
+        p = self.file(); self.age()
+        state = self.a.load(); del state['root_volume_uuid']; self.a.save(state)
+        report, upgraded = self.a.scan()
+        self.assertEqual([item['relative'] for item in report['eligible']], [p.name])
+        self.assertEqual(upgraded['root_volume_uuid'], self.volume_uuid)
+
+    def test_legacy_device_change_starts_new_observation(self):
+        p = self.file(); self.age(); self.change_saved_device(legacy=True)
+        self.assertEqual(self.a.expire()['removed'], 0); self.assertTrue(p.exists())
+        self.assertEqual(self.a.load()['entries'][p.name]['seen'], self.now)
+
+    def test_different_volume_cannot_inherit_expired_state(self):
+        p = self.file(); self.age()
+        self.volume_uuid = '1298f20b-4783-476e-884a-52d9c376000c'
+        self.assertEqual(self.a.expire()['removed'], 0); self.assertTrue(p.exists())
+
+    def test_volume_lookup_failure_preserves_ledger_and_files(self):
+        p = self.file(); self.age()
+        old = self.a.state_path.read_bytes()
+        self.volume_uuid = None
+        with self.assertRaisesRegex(ValueError, 'Cannot verify the archive volume'):
+            self.a.expire()
+        self.assertEqual(self.a.state_path.read_bytes(), old); self.assertTrue(p.exists())
 
     def test_new_file_in_old_archive_gets_its_own_ten_days(self):
         old = self.file(); self.age(); new = self.file('new.txt')
