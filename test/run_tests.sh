@@ -622,6 +622,129 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# ── purge: the confirmed exit ────────────────────────────────────────────────
+q_manifest="${DEVPURGE_QUARANTINE_DIR}/manifest.tsv"
+q_backdate() {
+  sed -i '' "s/^$1	[0-9]*	/$1	$(( $(date +%s) - 40 * 86400 ))	/" "$q_manifest"
+}
+q_add() {
+  devpurge_quarantine_add "$1" "purge test" >/dev/null 2>&1
+  cut -f1 "$q_manifest" | tail -1
+}
+q_stored() { awk -F'\t' -v id="$1" '$1 == id {print $5}' "$q_manifest"; }
+q_class() {
+  local r
+  r=$(_dp_quarantine_purge_class "$(awk -F'\t' -v id="$1" '$1 == id {print $3}' "$q_manifest")" "$(q_stored "$1")")
+  printf '%s' "${r%%$'\t'*}"
+}
+q_purge() { _dp_quarantine_locked _dp_quarantine_purge_locked "$@"; }
+q_exists() { if [[ -e "$(q_stored "$1")" ]]; then printf yes; else printf no; fi; }
+
+# the aged plain copy from the expire test is offered, but only as unchecked
+q_plain="$q_last_id"
+q_plain_stored=$(q_stored "$q_plain")
+assert_eq "purge: plain copy is classed unverified" "unverified" "$(q_class "$q_plain")"
+
+# no terminal, no deletion
+assert_exit_code "purge refuses to run without a terminal" 1 devpurge_quarantine_purge </dev/null
+assert_eq "purge without a terminal deletes nothing" "yes" "$(q_exists "$q_plain")"
+
+# preview is read-only
+q_dry=$(devpurge_quarantine_purge dry 2>/dev/null)
+assert_contains "purge dry run lists the due entry" "$q_plain" "$q_dry"
+assert_eq "purge dry run deletes nothing" "yes" "$(q_exists "$q_plain")"
+
+# an entry inside the grace period is never deleted, even if asked for by ID
+mkdir -p "${Q_TMP}/fresh"
+q_fresh=$(q_add "${Q_TMP}/fresh")
+_dp_quarantine_purge_plan >/dev/null 2>&1
+assert_eq "purge plan offers only due entries" "$q_plain" "${DEVPURGE_PURGE_UNVERIFIED[*]}"
+assert_exit_code "purge keeps an entry that is not due" 1 q_purge "${q_fresh}:unverified"
+assert_eq "entry that is not due still exists" "yes" "$(q_exists "$q_fresh")"
+
+# secrets and protected names inside an uncheckable copy hold it
+mkdir -p "${Q_TMP}/with-env"
+printf 'x' > "${Q_TMP}/with-env/.env.local"
+q_env=$(q_add "${Q_TMP}/with-env"); q_backdate "$q_env"
+assert_eq "purge holds a copy containing .env" "held" "$(q_class "$q_env")"
+assert_exit_code "purge keeps a held entry even if asked for by ID" 1 q_purge "${q_env}:unverified"
+assert_eq "held entry still exists" "yes" "$(q_exists "$q_env")"
+
+mkdir -p "${Q_TMP}/with-contract/sub"
+printf 'x' > "${Q_TMP}/with-contract/sub/契約書.pdf"
+q_prot=$(q_add "${Q_TMP}/with-contract"); q_backdate "$q_prot"
+assert_eq "purge holds a copy containing a protected name" "held" "$(q_class "$q_prot")"
+
+# git worktrees: git decides
+git init -q -b main "${Q_TMP}/repo"
+git -C "${Q_TMP}/repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+git -C "${Q_TMP}/repo" worktree add -q -b wt-clean "${Q_TMP}/wt-clean" >/dev/null 2>&1
+git -C "${Q_TMP}/repo" worktree add -q -b wt-dirty "${Q_TMP}/wt-dirty" >/dev/null 2>&1
+git -C "${Q_TMP}/repo" worktree add -q -b wt-pruned "${Q_TMP}/wt-pruned" >/dev/null 2>&1
+printf 'work in progress' > "${Q_TMP}/wt-dirty/notes.txt"
+q_clean=$(q_add "${Q_TMP}/wt-clean"); q_backdate "$q_clean"
+q_dirty=$(q_add "${Q_TMP}/wt-dirty"); q_backdate "$q_dirty"
+q_pruned=$(q_add "${Q_TMP}/wt-pruned"); q_backdate "$q_pruned"
+rm -rf "${Q_TMP}/repo/.git/worktrees/wt-pruned"
+
+# quarantine re-points the git registration, so a later prune cannot orphan it
+q_registered=$(git -C "${Q_TMP}/repo" worktree list --porcelain | grep -c "^worktree .*/quarantine/${q_clean}-wt-clean$" || true)
+assert_eq "quarantine keeps a worktree registered at its stored path" "1" "$q_registered"
+q_prunable=$(git -C "${Q_TMP}/repo" worktree list --porcelain | grep -B3 "^prunable" | grep -c "wt-clean\|wt-dirty" || true)
+assert_eq "quarantined worktrees are not prunable" "0" "$q_prunable"
+
+# the ordinary worktree tier never takes a quarantined worktree
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+q_age_backup="$DEVPURGE_WORKTREE_AGE_DAYS"; DEVPURGE_WORKTREE_AGE_DAYS=0; DEVPURGE_WORKTREE_LOCAL=1
+_dp_scan_repo_worktrees "${Q_TMP}/repo" >/dev/null 2>&1 || true
+q_scanned=$(printf '%s\n' ${SCAN_RESULTS[@]+"${SCAN_RESULTS[@]}"} | grep -c "/quarantine/" || true)
+assert_eq "worktree scan leaves quarantined worktrees to --purge" "0" "$q_scanned"
+DEVPURGE_WORKTREE_AGE_DAYS="$q_age_backup"; DEVPURGE_WORKTREE_LOCAL=0
+
+assert_eq "purge: clean worktree is verified by git" "verified" "$(q_class "$q_clean")"
+assert_eq "purge holds a worktree with untracked work" "held" "$(q_class "$q_dirty")"
+assert_eq "purge: pruned worktree cannot be verified" "unverified" "$(q_class "$q_pruned")"
+
+q_clean_stored=$(q_stored "$q_clean")
+assert_exit_code "purge removes a verified worktree" 0 q_purge "${q_clean}:verified"
+TOTAL=$((TOTAL + 1))
+if [[ ! -e "$q_clean_stored" ]] \
+  && git -C "${Q_TMP}/repo" rev-parse -q --verify refs/heads/wt-clean >/dev/null \
+  && ! git -C "${Q_TMP}/repo" worktree list --porcelain | grep -q "wt-clean$" \
+  && ! cut -f1 "$q_manifest" | grep -qx "$q_clean"; then
+  printf "  PASS: verified worktree removed through git, branch kept\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: verified worktree removal left an inconsistent state\n"
+  FAIL=$((FAIL + 1))
+fi
+assert_exit_code "purge will not rm a worktree that was shown as verified" 1 q_purge "${q_dirty}:verified"
+assert_eq "dirty worktree still exists" "yes" "$(q_exists "$q_dirty")"
+
+# a retention extension made in the app holds the entry
+q_future=$(( $(date +%s) + 86400 ))
+printf '{"version":1,"entries":{"k":{"qid":"%s","path":"%s","review_after":%s}}}\n' \
+  "$q_plain" "$q_plain_stored" "$q_future" > "${DEVPURGE_QUARANTINE_DIR}/catalog.json"
+assert_exit_code "purge keeps an entry whose retention was extended" 1 q_purge "${q_plain}:unverified"
+assert_eq "extended entry still exists" "yes" "$(q_exists "$q_plain")"
+printf 'not json' > "${DEVPURGE_QUARANTINE_DIR}/catalog.json"
+assert_exit_code "purge stops when retention records are unreadable" 1 q_purge "${q_plain}:unverified"
+assert_eq "unreadable retention records delete nothing" "yes" "$(q_exists "$q_plain")"
+rm -f "${DEVPURGE_QUARANTINE_DIR}/catalog.json"
+
+# confirmed deletion of an unchecked copy
+assert_exit_code "purge deletes a confirmed unchecked copy" 0 q_purge "${q_plain}:unverified"
+TOTAL=$((TOTAL + 1))
+if [[ ! -e "$q_plain_stored" ]] && ! cut -f1 "$q_manifest" | grep -qx "$q_plain" \
+  && grep -q "	${q_plain}	.*	deleted$" "${DEVPURGE_LOG_DIR}"/quarantine-purge-*.tsv 2>/dev/null \
+  && [[ ! -e "${DEVPURGE_QUARANTINE_DIR}/.operation-lock" ]]; then
+  printf "  PASS: purge deletes, drops the record, logs and releases the lock\n"
+  PASS=$((PASS + 1))
+else
+  printf "  FAIL: purge left the copy, the record, no log or a stale lock\n"
+  FAIL=$((FAIL + 1))
+fi
+
 rm -rf "$Q_TMP"
 unset DEVPURGE_QUARANTINE_DIR
 
@@ -829,6 +952,26 @@ SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
 _dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
 pu_ahead=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|review|.*not pushed" || true)
 assert_eq "unpushed local commit demotes to review" "1" "$pu_ahead"
+
+# Opt-in: a clean worktree on a local-only branch is deletable (the ref stays)
+DEVPURGE_WORKTREE_LOCAL=1
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+pu_local=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|worktree|.*unmerged, branch kept locally, clean" || true)
+assert_eq "worktree_local_branch makes a clean local-only worktree deletable" "1" "$pu_local"
+echo 'in progress' > "${PU_TMP}/wt-pu/untracked.txt"
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+pu_local_dirty=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|review|.*dirty" || true)
+assert_eq "worktree_local_branch never overrides uncommitted work" "1" "$pu_local_dirty"
+rm -f "${PU_TMP}/wt-pu/untracked.txt"
+git -C "${PU_TMP}/wt-pu" checkout -q --detach
+SCAN_RESULTS=(); WT_COUNT=0; RV_COUNT=0; DEVPURGE_WT_ROOTS=()
+_dp_scan_repo_worktrees "${PU_TMP}/repo" >/dev/null
+pu_local_detached=$(printf '%s\n' "${SCAN_RESULTS[@]}" | grep -c "|review|.*detached" || true)
+assert_eq "worktree_local_branch never covers a detached HEAD" "1" "$pu_local_detached"
+git -C "${PU_TMP}/wt-pu" checkout -q feat-pu
+DEVPURGE_WORKTREE_LOCAL=0
 git -C "${PU_TMP}/wt-pu" push -q origin feat-pu
 
 # Removal logs a restore record and keeps the branch

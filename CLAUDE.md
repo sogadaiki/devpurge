@@ -21,7 +21,7 @@ macOS向けキャッシュ削除CLIツール。
 - `lib/scan.sh` — スキャン（静的 + node_modules/.next動的 + misc/Electron/Containerキャッシュ自動検出 + review）
 - `lib/worktree.sh` — stale git worktree検出（merged/squash-merged/未マージだがorigin退避済み + clean + idle + 一点物なし→削除可、それ以外→review報告のみ。squashはgit cherryのpatch同値で判定。削除前に復元用TSVをApp Support/devpurge/logs/へ）
 - `lib/branches.sh` — マージ済みブランチ削除（git branch -dのみ、SHA復元ログをApp Support/devpurge/logs/へ）
-- `lib/quarantine.sh` — 隔離（mv+manifest、30日は再確認目安、restore可）。期限切れ処理は報告のみ。`lib/quarantine_store.py` は監査照合・保持元再検証・アプリ復元/延長、assistantの本人確認後にだけ完全削除。CLIとアプリは共通 `.operation-lock` を使用。保護パターンは継続。
+- `lib/quarantine.sh` — 隔離（mv+manifest、30日は再確認目安、restore可）。通常清掃・無人実行の期限切れ処理は報告のみ。出口は `quarantine --purge`: 猶予経過分を端末に一覧し、本人が承認した分だけ削除する（端末なしは拒否、`-n`でプレビュー）。gitがクリーンと保証するworktreeは `git worktree remove`、git登録が消えたworktreeと一般コピーは「未検証」として別に確認、`.env*`・ローカルDB・IPA・保護名を含むもの／未コミットあり／アプリで保持延長中は保持。削除直前に再判定し、結果は `logs/quarantine-purge-*.tsv`。`lib/quarantine_store.py` は監査照合・保持元再検証・アプリ復元/延長、assistantの本人確認後にだけ完全削除。CLIとアプリは共通 `.operation-lock` を使用。保護パターンは継続。
 - `lib/quarantine_git.py` — 隔離worktreeの読み取り専用証拠確認。原本/保護ファイル・固有ignored・復元不明は保持。検証成功も通常の完全削除を許可しない。重複素材フォルダは全ファイルの保持先を再ハッシュ。所在なし/未確認と記録容量を区別する。詳細は `docs/system-data-recovery.md`。
 - `lib/archive.sh` / `lib/archive.py` — 明示指定したアーカイブのファイル単位の期限管理。初回登録から10日以上、最終観測利用から10日以上で削除。通常キャッシュ/重複走査はこの領域を除外する
 - `lib/dupes.sh` — 内容同一ファイル検出（SHA-256、名前不問、先頭末尾1MBの予備指紋で全ハッシュを最小化）+ 明示的バージョン違い検出（-v2/_final/(1)/ 2/のコピー。素の_1/_2は分割・連番なので対象外）+ Spotlight未使用日レポート
@@ -42,6 +42,7 @@ macOS向けキャッシュ削除CLIツール。
 - **アーカイブの読み取り専用モードは台帳も変更しない**: `archive --dry-run` / `--json` / 全体`-n`。登録は `archive --track`、再利用前の期限延長は `archive --touch <path>`。通常実行は新着登録と期限切れ整理を行う。`--ai-only` / `sudo` ではアーカイブ整理しない。共有スキルは `skills/archive-cleanup/SKILL.md`、仕様は `docs/archive-retention.md`
 - **worktreeはrm -rf禁止**。`git worktree remove`（--force無し）のみ。dirty/lockedはgitが拒否する
 - **無人実行(-y)ではworktree削除をスキップ**（gitignoreされた.env等はclean判定に出ないため）。rc `worktree_auto=1` か env `DEVPURGE_WORKTREE_AUTO=1` でopt-in。`.env*`を含むworktree、再生成不能なignoredファイルを持つworktree、未マージかつ未push/detachedのworktreeはreview行き。削除直前にも再判定する。7日はHEADコミット日時で判定し、origin退避判定はローカルremote-tracking refを使用
+- **未pushブランチのworktreeはopt-inで自動対象**: rc `worktree_local_branch=1`（env `DEVPURGE_WORKTREE_LOCAL=1`）で、未push・未マージでもクリーン・idle・固有ignoredなし・`.env*`なし・非detachedなら削除可。worktreeはブランチを所有せず、refは本体リポジトリに残るため、このMac上では何も失われない。既定は従来どおりorigin退避を要求（ディスク故障への備え）。このMacは2026-11-12にユーザーが「証明できた物は全自動」と決定し有効化。未コミット・detached・ロックは対象外のまま
 - **再生成可能物**: `.open-next`、`.godot`、`*.tsbuildinfo`、`next-env.d.ts`、`.refresh.lock` を含む。ただし配下のIPA/PCK・Archive/dSYM・ソースsnapshot・端末セーブ控え・ローカルDB・Godot export credentialsは保持しworktreeをreviewへ送る。重複ビルドの整理は別のbuild-care検証で行う。ignored一覧取得失敗はreview。worktree間の旧版重複は同じGit common-dir・相対パス・内容の場合だけ集約
 - **worktreeログは試行と成功を区別**: 削除前の `removed-worktrees-*.tsv` は復元用、結果の `worktree-removal-results-*.tsv` は週次成功集計用
 - **worktree復元ログに記録されたブランチはブランチ自動整理からも保護**（同じ実行内・次回以降とも保持）
