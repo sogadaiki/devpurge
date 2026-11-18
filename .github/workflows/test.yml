@@ -12,6 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Build the Headroom menu bar app and verify native fixtures
+        run: |
+          python3 headroom/install.py --destination "$RUNNER_TEMP/headroom-app"
+          python3 headroom/test.py
+
       - name: Make scripts executable
         run: |
           chmod +x bin/devpurge
