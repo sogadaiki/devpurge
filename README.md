@@ -1,5 +1,12 @@
 # devpurge
 
+## 余白 — Macのメニューバーから整理する
+
+「余白」は内蔵SSDの空きとメモリ負荷をメニューバーに表示する独立したmacOSアプリです。
+開発ツールやシステム領域の占有量、案件別の増減、起動中のアプリを確認し、対象を選んで整理できます。
+macOS 13以降、Xcode Command Line Tools、Python 3.9以降を使って `python3 headroom/install.py` でビルドし、
+`open ~/Applications/余白.app` で起動します。[操作と計測範囲](headroom/README.md)
+
 **Completed-build care (CLI0.9):** register build output roots to verify old
 IPA/PCK/framework copies and generated imports. Preserve newest2 plus pinned
 releases and every IPA/signed archive/source. Permanent automatic cleanup is
