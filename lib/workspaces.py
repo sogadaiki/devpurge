@@ -46,6 +46,8 @@ def branch_group(row):
     if row['protected']:
         return '主要・復元用などの保護対象'
     if row['merged'] is True:
+        if row.get('upstream_configured') is not False and row.get('upstream_merged') is not True:
+            return '既定ブランチには統合済み・追跡先を要確認'
         return '統合済み・未チェックアウトの整理候補'
     if row['merged'] is False:
         return '統合を確認できていないブランチ'
@@ -77,8 +79,9 @@ def collect(paths):
             projects.append(project)
         except (ValueError, OSError) as error:
             errors.append(f'{path} — {error}')
-    registered = {Path(row['path']) for project in projects for row in project['worktrees']}
-    locations = discover([Path(project['repo']) for project in projects], registered) if projects else {'folders': [], 'warnings': []}
+    registered = {Path(project['repo']): {Path(row['path']) for row in project['worktrees']}
+                  for project in projects}
+    locations = discover(list(registered), set().union(*registered.values()), registered) if projects else {'folders': [], 'warnings': []}
     return {'time': datetime.now().astimezone().isoformat(timespec='seconds'),
             'projects': projects, 'folders': locations['folders'],
             'warnings': errors + locations['warnings'], 'failed_projects': len(errors)}
@@ -111,9 +114,13 @@ def groups(report):
         folders = [row for row in report['folders'] if row['project'] == project['repo']]
         extra = sum(not row['primary'] for row in project['worktrees'])
         candidates = [b for b in branches if branch_group(b) == '統合済み・未チェックアウトの整理候補']
-        folder_summary = '登録外フォルダは調査対象外' if project.get('metadata_only') else f'発見した登録外フォルダ {len(folders)} 件'
+        review_upstream = [b for b in branches if branch_group(b) == '既定ブランチには統合済み・追跡先を要確認']
+        retained = [r for r in folders if r['kind'] == 'retained']
+        unlisted = [r for r in folders if r['kind'] != 'retained']
+        folder_summary = ('登録外フォルダは調査対象外' if project.get('metadata_only')
+                          else f'発見した登録外フォルダ {len(unlisted)} 件 ／ 保持場所の登録外フォルダ {len(retained)} 件')
         summary = (f"追加作業コピー {extra} 件 ／ ローカルブランチ {len(branches)} 本"
-                   f" ／ 統合済みブランチ候補 {len(candidates)} 本 ／ {folder_summary}")
+                   f" ／ 統合済みブランチ候補 {len(candidates)} 本 ／ 追跡先の確認待ち {len(review_upstream)} 本 ／ {folder_summary}")
         sections = [('登録作業コピー（本体を含む）', list(worktree_lines(project)))]
         pending = [r['path'] for r in project['worktrees'] if r['review_for_retirement']]
         if pending:
@@ -124,13 +131,18 @@ def groups(report):
             value = branch['name']
             if label == '統合済み・未チェックアウトの整理候補':
                 value += '  ' + branch['head']
+            elif label == '既定ブランチには統合済み・追跡先を要確認':
+                value += '  ' + (branch.get('upstream') or '追跡先を特定できません')
             by_group.setdefault(label, []).append(value)
-        for label in ('統合済み・未チェックアウトの整理候補', '統合を確認できていないブランチ',
+        for label in ('統合済み・未チェックアウトの整理候補', '既定ブランチには統合済み・追跡先を要確認',
+                      '統合を確認できていないブランチ',
                       '主要・復元用などの保護対象', 'チェックアウト中', '判定できなかったブランチ'):
             if label in by_group:
                 sections.append((label, by_group[label]))
-        if folders:
-            sections.append(('登録外フォルダの所在', folder_lines(folders)))
+        if unlisted:
+            sections.append(('登録外フォルダの所在', folder_lines(unlisted)))
+        if retained:
+            sections.append(('保管済みの作業フォルダ', folder_lines(retained)))
         if project['warnings']:
             sections.append(('確認範囲に関する注意', project['warnings']))
         yield project['repo'], summary, sections
