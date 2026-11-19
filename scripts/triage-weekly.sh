@@ -53,6 +53,11 @@ if ! python3 "${SCRIPT_DIR}/../lib/project_storage_review.py" \
   printf '%s local project storage review failed\n' "$(date '+%Y-%m-%d %H:%M')" >> "${LOG_DIR}/devpurge-triage.log"
 fi
 
+# Local-only project inventory. An empty workspace_project list skips this report.
+if ! python3 -B "${SCRIPT_DIR}/../lib/workspaces.py" --refresh-report "$PROJECT_REVIEW_DIR"; then
+  printf '%s local workspace report failed\n' "$(date '+%Y-%m-%d %H:%M')" >> "${LOG_DIR}/devpurge-triage.log"
+fi
+
 # quarantineの状態と、直近7日に自動削除したworktreeの復元情報も添える
 "$DEVPURGE_BIN" quarantine --list > "${WORK_DIR}/quarantine.txt" 2>/dev/null || true
 : > "${WORK_DIR}/removed-worktrees.tsv"
