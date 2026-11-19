@@ -1,5 +1,9 @@
 # devpurge
 
+## 案件のデータ索引
+
+「余白」の「データ索引」で、各案件の原本、納品物、一時的な出力やコピーについて、担当・理由・次に見直す条件を記録できます。Gitを使わない動画・ゲーム制作フォルダにも対応しています。ターミナルからは `devpurge index list . --json` で同じ記録を読めます。[作業後に索引を残す手順](docs/project-index.md)
+
 ## 案件別の作業コピーとブランチ
 
 `devpurge workspaces project-a project-b` で、案件ごとの追加作業コピー、

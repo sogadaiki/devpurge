@@ -16,6 +16,11 @@ while [[ -L "$DEVPURGE_SCRIPT" ]]; do
 done
 DEVPURGE_DIR="$(cd "$(dirname "$DEVPURGE_SCRIPT")/.." && pwd)"
 
+if [[ "${1:-}" == "index" ]]; then
+  shift
+  exec python3 -B "${DEVPURGE_DIR}/lib/project_index.py" "$@"
+fi
+
 if [[ "${1:-}" == "workspaces" ]]; then
   shift
   exec python3 -B "${DEVPURGE_DIR}/lib/workspaces.py" "$@"
@@ -100,6 +105,7 @@ devpurge - Purge hidden dev caches on macOS
 
 USAGE
   devpurge [OPTIONS]
+  devpurge index --help               Index source, deliverables and work files per project
   devpurge workspaces REPO...         Review project worktrees, branches and copy folders
   devpurge workspaces --help          Show report formats and single-worktree retirement
   devpurge studio                     Open the local storage dashboard

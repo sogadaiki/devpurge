@@ -91,19 +91,22 @@ private struct InventoryError: LocalizedError {
 
 struct InventoryReadToken {
     fileprivate let generation: UInt64
+    fileprivate let scope: InventoryScope
 }
+
+enum InventoryScope { case workspaces, projectIndex }
 
 final class InventoryProcesses {
     private let lock = NSLock()
-    private var jobs: [ObjectIdentifier: (process: Process, writing: Bool)] = [:]
-    private var generation: UInt64 = 0
+    private var jobs: [ObjectIdentifier: (process: Process, readScope: InventoryScope?)] = [:]
+    private var generations: [InventoryScope: UInt64] = [:]
     private var quitting = false
     private var afterWrites: (() -> Void)?
 
-    func readToken() -> InventoryReadToken {
+    func readToken(_ scope: InventoryScope = .workspaces) -> InventoryReadToken {
         lock.lock()
         defer { lock.unlock() }
-        return InventoryReadToken(generation: generation)
+        return InventoryReadToken(generation: generations[scope, default: 0], scope: scope)
     }
 
     func check(_ token: InventoryReadToken) throws {
@@ -114,7 +117,7 @@ final class InventoryProcesses {
 
     private func checkLocked(_ token: InventoryReadToken?) throws {
         guard !quitting else { throw InventoryError(message: "余白の終了処理中です。") }
-        if let token, token.generation != generation { throw InventoryError(message: "読み取りを中止しました。") }
+        if let token, token.generation != generations[token.scope, default: 0] { throw InventoryError(message: "読み取りを中止しました。") }
     }
 
     func start(_ process: Process, readToken: InventoryReadToken?) throws {
@@ -124,21 +127,21 @@ final class InventoryProcesses {
         do { try process.run() } catch {
             throw InventoryError(message: "調査機能を起動できません。Xcode Command Line Tools の Python 3 を確認してください。")
         }
-        jobs[ObjectIdentifier(process)] = (process, readToken == nil)
+        jobs[ObjectIdentifier(process)] = (process, readToken?.scope)
     }
 
     func finish(_ process: Process) {
         lock.lock()
         jobs.removeValue(forKey: ObjectIdentifier(process))
-        let notify = jobs.values.contains(where: { $0.writing }) ? nil : afterWrites
+        let notify = jobs.values.contains(where: { $0.readScope == nil }) ? nil : afterWrites
         if notify != nil { afterWrites = nil }
         lock.unlock()
         if let notify { DispatchQueue.main.async(execute: notify) }
     }
 
-    private func cancelReadsLocked() {
-        generation &+= 1
-        for job in jobs.values where !job.writing && job.process.isRunning {
+    private func cancelReadsLocked(_ scope: InventoryScope? = nil) {
+        if let scope { generations[scope, default: 0] &+= 1 }
+        for job in jobs.values where job.readScope != nil && (scope == nil || job.readScope == scope) && job.process.isRunning {
             let pid = job.process.processIdentifier
             guard pid > 1 else { continue }
             // Darwin Foundation launches Process in its own process group. Check ownership
@@ -151,7 +154,7 @@ final class InventoryProcesses {
     func cancelReads() {
         lock.lock()
         defer { lock.unlock() }
-        cancelReadsLocked()
+        cancelReadsLocked(.workspaces)
     }
 
     func prepareForQuit(afterWrites: @escaping () -> Void) -> Bool {
@@ -159,7 +162,7 @@ final class InventoryProcesses {
         defer { lock.unlock() }
         quitting = true
         cancelReadsLocked()
-        guard jobs.values.contains(where: { $0.writing }) else { return true }
+        guard jobs.values.contains(where: { $0.readScope == nil }) else { return true }
         if self.afterWrites == nil { self.afterWrites = afterWrites }
         return false
     }
@@ -191,7 +194,7 @@ private final class InventoryDiagnostics {
 enum WorkspaceInventory {
     private static let processes = InventoryProcesses()
 
-    static func readToken() -> InventoryReadToken { processes.readToken() }
+    static func readToken(_ scope: InventoryScope = .workspaces) -> InventoryReadToken { processes.readToken(scope) }
     static func cancelReads() { processes.cancelReads() }
     static func prepareForQuit(afterWrites: @escaping () -> Void) -> Bool {
         processes.prepareForQuit(afterWrites: afterWrites)
@@ -256,6 +259,10 @@ enum WorkspaceInventory {
         reader.wait()
         if let token { try tracker.check(token) }
         guard process.terminationReason == .exit, statuses.contains(process.terminationStatus) else {
+            if script.lastPathComponent == "project_index.py", let report = try? JSONDecoder().decode([String: String].self, from: data),
+               let message = report["error"], !message.isEmpty {
+                throw InventoryError(message: String(message.prefix(800)))
+            }
             throw InventoryError(message: diagnostics.message ?? "操作の結果を取得できません。案件を再読み込みして状態を確認してください。")
         }
         let decoder = JSONDecoder()

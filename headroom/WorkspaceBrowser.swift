@@ -203,6 +203,7 @@ private extension InventoryBranchCategory {
 
 struct WorkspaceBrowser: View {
     @ObservedObject var model: WorkspaceBrowserModel
+    let openIndex: (String) -> Void
     @State private var section: InventorySection = .trees
     @State private var query = ""
     @State private var candidatesOnly = false
@@ -343,6 +344,9 @@ struct WorkspaceBrowser: View {
                 Text(fileName(project.repo)).font(.headline)
                 if project.metadataOnly { Text("清掃除外・Gitの登録情報のみ").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
+                if !project.metadataOnly {
+                    Button("データ索引") { openIndex(project.repo) }
+                }
                 finder(project.repo)
             }
             Picker("表示する項目", selection: $section) {
