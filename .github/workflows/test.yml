@@ -34,6 +34,9 @@ jobs:
       - name: Verify project workspace inventory and retirement
         run: python3 -B -m unittest discover -s test -p 'test_workspace*.py'
 
+      - name: Verify project data index
+        run: python3 -B -m unittest discover -s test -p 'test_project_index.py'
+
       - name: Verify archive retention guards
         run: python3 test/test_archive.py
 

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum Area: String, CaseIterable {
-    case disk = "ストレージ", project = "案件別", workspaces = "作業コピー", memory = "メモリ"
+    case disk = "ストレージ", project = "案件別", workspaces = "作業コピー", dataIndex = "データ索引", memory = "メモリ"
 }
 
 final class HeadroomModel: ObservableObject {

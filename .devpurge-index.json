@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "keeper": null,
+      "owner": "devpurge開発担当",
+      "path": "bin/devpurge",
+      "reason": "コマンドの入口。引数解析と各機能の起動に使用。",
+      "rebuild": null,
+      "role": "source",
+      "until": null
+    },
+    {
+      "keeper": null,
+      "owner": "devpurge開発担当",
+      "path": "test/run_tests.sh",
+      "reason": "清掃対象と保護対象の既存動作を検証するテスト。",
+      "rebuild": null,
+      "role": "source",
+      "until": null
+    }
+  ]
+}

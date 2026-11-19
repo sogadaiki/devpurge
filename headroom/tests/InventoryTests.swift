@@ -42,11 +42,13 @@ struct InventoryTests {
 
         let manual = InventoryProcesses()
         let old = manual.readToken()
+        let indexRead = manual.readToken(.projectIndex)
         let marker = home.appendingPathComponent("manual-job")
         let reading = launch("read", tracker: manual, marker: marker)
         precondition(waitFor { (try? String(contentsOf: marker, encoding: .utf8)).flatMap(Int32.init) != nil })
         let child = try Int32(String(contentsOf: marker, encoding: .utf8))!
         manual.cancelReads()
+        try manual.check(indexRead)
         precondition(reading.wait(timeout: .now() + 4) == .success)
         precondition(waitFor { kill(child, 0) == -1 && errno == ESRCH })
         do {

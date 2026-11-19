@@ -15,6 +15,7 @@ private struct Selection: Identifiable {
 struct Dashboard: View {
     @ObservedObject var model: HeadroomModel
     @StateObject private var workspaceBrowserModel = WorkspaceBrowserModel()
+    @StateObject private var projectIndex = ProjectIndexModel()
     @State private var confirmed: Confirmation?
     @State private var selection: Selection?
 
@@ -30,7 +31,7 @@ struct Dashboard: View {
             Picker("表示", selection: $model.page) {
                 ForEach(Area.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }.pickerStyle(.segmented).labelsHidden()
-            if !model.result.isEmpty {
+            if !model.result.isEmpty && model.page != .dataIndex {
                 HStack(alignment: .top) {
                     Text(model.result).textSelection(.enabled).font(.callout)
                     Spacer()
@@ -41,10 +42,14 @@ struct Dashboard: View {
             switch model.page {
             case .disk: disk
             case .project: project
-            case .workspaces: WorkspaceBrowser(model: workspaceBrowserModel)
+            case .workspaces: WorkspaceBrowser(model: workspaceBrowserModel) { root in
+                projectIndex.open(URL(fileURLWithPath: root))
+                model.page = .dataIndex
+            }
+            case .dataIndex: ProjectIndexView(model: projectIndex)
             case .memory: memory
             }
-            if !model.busy.isEmpty && model.page != .workspaces {
+            if !model.busy.isEmpty && model.page != .workspaces && model.page != .dataIndex {
                 HStack { ProgressView().controlSize(.small); Text(model.busy).font(.callout) }
                     .accessibilityElement(children: .combine)
             }

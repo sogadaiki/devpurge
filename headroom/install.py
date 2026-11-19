@@ -17,7 +17,7 @@ def bundle_workspace_backend(repo, contents):
         "workspaces", "workspace_branch", "workspace_compare", "workspace_folders",
         "workspace_git", "workspace_retire", "studio", "bounded_fs", "cleanup_assistant",
         "expanded_scope", "job_recovery", "quarantine_adapters", "quarantine_git",
-        "quarantine_store", "render_care",
+        "quarantine_store", "render_care", "project_index",
     )
     library = contents / "Resources/devpurge/lib"
     library.mkdir(parents=True)
@@ -28,7 +28,7 @@ def bundle_workspace_backend(repo, contents):
     subprocess.run([
         "/usr/bin/python3", "-I", "-B", "-S", "-c",
         "import sys; sys.path.insert(0, sys.argv[1]); "
-        "import workspaces, workspace_branch, workspace_compare, workspace_retire",
+        "import workspaces, workspace_branch, workspace_compare, workspace_retire, project_index",
         str(library.resolve()),
     ], cwd=contents, check=True)
 
@@ -58,8 +58,8 @@ def install(destination):
                 "CFBundleExecutable": "Headroom",
                 "CFBundleInfoDictionaryVersion": "6.0",
                 "CFBundlePackageType": "APPL",
-                "CFBundleShortVersionString": "0.2",
-                "CFBundleVersion": "2",
+                "CFBundleShortVersionString": "0.3",
+                "CFBundleVersion": "3",
                 "NSDesktopFolderUsageDescription": "登録した開発案件の作業コピー、Gitブランチ、保管フォルダを確認するために使います。",
                 "LSMinimumSystemVersion": "13.0",
                 "LSUIElement": True,
