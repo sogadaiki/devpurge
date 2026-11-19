@@ -49,7 +49,7 @@ class RetireTest(unittest.TestCase):
 
     def test_retire_matches_existing_branch_guard_and_recovery_command(self):
         self.idle.side_effect = REAL_IDLE
-        report = wr.retire(self.repo, self.target)
+        report = wr.retire(self.repo, self.target, expected=("feature/test", self.ref))
         self.assertEqual(report["status"], "retired", report)
         self.assertTrue(report["verified"])
         self.assertFalse(self.target.exists())
@@ -65,6 +65,13 @@ class RetireTest(unittest.TestCase):
         self.assertNotIn("feature/test", deletable.splitlines())
         subprocess.run(wr.shlex.split(report["restore_command"]), check=True, capture_output=True)
         self.assertEqual((self.target / "prototype").read_text(), "original")
+
+    def test_confirmation_holds_changed_commit_or_branch_at_same_path(self):
+        for expected in (("feature/test", "0" * len(self.ref)), ("other-branch", self.ref)):
+            result = wr.retire(self.repo, self.target, expected=expected)
+            self.assertEqual(result["status"], "held", result)
+            self.assertIn("確認したブランチ", result["reason"])
+            self.assertTrue(self.target.is_dir())
 
     def test_holds_dirty_untracked_ignored_and_recent(self):
         file = self.target / "prototype"

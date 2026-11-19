@@ -12,6 +12,7 @@ final class HeadroomApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appMenuItem = NSMenuItem()
         appMenu.addItem(appMenuItem)
         let commands = NSMenu()
+        commands.addItem(withTitle: "作業コピーとブランチ", action: #selector(showWorkspaces), keyEquivalent: "2").target = self
         commands.addItem(withTitle: "ウインドウを閉じる", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         commands.addItem(withTitle: "余白を終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = commands
@@ -43,9 +44,15 @@ final class HeadroomApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if NSApp.currentEvent?.type == .rightMouseUp || NSApp.currentEvent?.modifierFlags.contains(.control) == true {
             let menu = NSMenu()
             menu.addItem(withTitle: "余白を開く", action: #selector(showWindow), keyEquivalent: "").target = self
+            menu.addItem(withTitle: "作業コピーとブランチ", action: #selector(showWorkspaces), keyEquivalent: "").target = self
             menu.addItem(withTitle: "余白を終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.minY), in: sender)
         } else { showWindow() }
+    }
+
+    @objc private func showWorkspaces() {
+        model.page = .workspaces
+        showWindow()
     }
 
     @objc private func showWindow() {
@@ -72,6 +79,11 @@ final class HeadroomApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let ready = WorkspaceInventory.prepareForQuit { sender.reply(toApplicationShouldTerminate: true) }
+        return ready ? .terminateNow : .terminateLater
+    }
 }
 
 let application = NSApplication.shared

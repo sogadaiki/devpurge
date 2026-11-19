@@ -54,6 +54,21 @@ class WorkspaceCLI(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(self.repo.is_dir())
 
+    def test_configured_inventory_does_not_scan_launch_directory(self):
+        result = self.run_cli('--json', '--configured-only')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data['projects'], [])
+        self.assertEqual(data['failed_projects'], 0)
+        (self.home / '.devpurgerc').write_text(f'workspace_project={self.repo}\n')
+        configured = self.run_cli('--json', '--configured-only')
+        self.assertEqual([p['repo'] for p in json.loads(configured.stdout)['projects']], [str(self.repo)])
+        self.assertNotEqual(self.run_cli('--json', '--configured-only', 'sample').returncode, 0)
+
+    def test_expected_worktree_requires_retire(self):
+        result = self.run_cli('sample', '--json', '--expect-worktree', 'sample', 'f'*40)
+        self.assertNotEqual(result.returncode, 0)
+
     def test_private_weekly_report_requires_registration_and_preserves_last_success(self):
         output = self.home / 'workspaces.html'
         option = ('--refresh-report', str(self.home))

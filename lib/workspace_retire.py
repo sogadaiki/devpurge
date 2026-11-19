@@ -245,7 +245,7 @@ def append_record(folder, name, line):
         os.fsync(fd)
 
 
-def retire(repo: Path, target: Path, *, check_only=False) -> dict:
+def retire(repo: Path, target: Path, *, check_only=False, expected=None) -> dict:
     """Verify twice, then ask Git to remove exactly one registered worktree."""
     repo, target = Path(repo), Path(target)
     receipt = {"repo": str(repo), "path": str(target), "status": "held"}
@@ -257,6 +257,8 @@ def retire(repo: Path, target: Path, *, check_only=False) -> dict:
         policy.physical(target)
         state = integrated(repo, target)
         admin, branch, head, default = state
+        require(expected is None or (branch, head) == expected,
+                "確認したブランチまたはコミットが変わったため保持します。もう一度状態を確認してください。")
         cutoff = time.time() - idle_days(home) * 86400
         proof = tree_evidence(repo, target, admin, head, policy, cutoff, True)
         idle(target)

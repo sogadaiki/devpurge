@@ -2,6 +2,8 @@
 
 作業中は、フォルダをもう一つ作る前に対象案件の一覧を開きます。作業の終了時は、使った作業コピー・残すブランチ・一時的に作ったファイルをこの一覧と照らし合わせます。
 
+Macではメニューバーの「余白」→「作業コピー」から案件を選べます。登録済みの案件を読み込み、比較・確認・整理をアプリ内で行えます。[余白の操作](../headroom/README.md#作業コピー)
+
 ```sh
 devpurge workspaces project-a project-b
 devpurge workspaces project-a --details

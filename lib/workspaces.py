@@ -256,7 +256,15 @@ def main(argv=None):
                         help='retire one integrated local branch at the reviewed commit')
     action.add_argument('--compare', nargs=2, type=Path, metavar=('COPY', 'KEEPER'),
                         help='compare file contents at matching paths; read-only')
+    parser.add_argument('--configured-only', action='store_true',
+                        help='list configured projects as JSON, including an empty list when none are configured')
+    parser.add_argument('--expect-worktree', nargs=2, metavar=('BRANCH', 'EXPECTED_SHA'),
+                        help='retire only the worktree branch and commit that were reviewed')
     args = parser.parse_args(argv)
+    if args.configured_only and (not args.json or args.projects or args.compare or args.retire or args.retire_branch or args.check_worktree):
+        parser.error('--configured-only requires --json and no project or action')
+    if args.expect_worktree and args.retire is None:
+        parser.error('--expect-worktree requires --retire')
     if args.compare:
         if args.projects or args.html or args.details or args.refresh_report:
             parser.error('--compare accepts two paths and optionally --json')
@@ -280,7 +288,8 @@ def main(argv=None):
             else:
                 from workspace_retire import retire
                 target = args.check_worktree or args.retire
-                result = retire(paths[0], target.expanduser().absolute(), check_only=args.check_worktree is not None)
+                result = retire(paths[0], target.expanduser().absolute(), check_only=args.check_worktree is not None,
+                                expected=tuple(args.expect_worktree) if args.expect_worktree else None)
         except (ValueError, OSError) as error:
             result = {'status': 'held', 'reason': str(error)}
         if args.json:
@@ -297,7 +306,7 @@ def main(argv=None):
             parser.error(str(error))
         if not paths and args.refresh_report:
             return 0
-    result = collect(paths or [Path.cwd()])
+    result = collect(paths if args.configured_only else paths or [Path.cwd()])
     if args.refresh_report:
         if result['failed_projects']:
             print('\n'.join(visible(w) for w in result['warnings']), file=sys.stderr)
