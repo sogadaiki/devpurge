@@ -16,6 +16,11 @@ while [[ -L "$DEVPURGE_SCRIPT" ]]; do
 done
 DEVPURGE_DIR="$(cd "$(dirname "$DEVPURGE_SCRIPT")/.." && pwd)"
 
+if [[ "${1:-}" == "workspaces" ]]; then
+  shift
+  exec python3 -B "${DEVPURGE_DIR}/lib/workspaces.py" "$@"
+fi
+
 if [[ "${1:-}" == "build-care" ]]; then
   shift
   exec python3 "${DEVPURGE_DIR}/lib/build_care.py" "$@"
@@ -95,6 +100,8 @@ devpurge - Purge hidden dev caches on macOS
 
 USAGE
   devpurge [OPTIONS]
+  devpurge workspaces REPO...         Review project worktrees, branches and copy folders
+  devpurge workspaces --help          Show report formats and single-worktree retirement
   devpurge studio                     Open the local storage dashboard
   devpurge diagnose                   Read-only storage diagnosis as JSON
   devpurge build-care scan            Verify old iOS build copies (no deletion)

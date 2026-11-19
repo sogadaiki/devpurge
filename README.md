@@ -1,5 +1,13 @@
 # devpurge
 
+## 案件別の作業コピーとブランチ
+
+`devpurge workspaces project-a project-b` で、案件ごとの追加作業コピー、
+ローカルブランチ、統合済みの整理候補、Git登録外のフォルダを確認できます。
+個別一覧は `--details`、ブラウザで見るローカルレポートは `--html`、
+Claude・Codexなどからの照会は `--json`。既定の操作は読み取り専用です。
+[比較・整理・復元の手順](docs/workspaces.md)
+
 ## 余白 — Macのメニューバーから整理する
 
 「余白」は内蔵SSDの空きとメモリ負荷をメニューバーに表示する独立したmacOSアプリです。
