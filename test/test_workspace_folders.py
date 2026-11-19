@@ -51,6 +51,18 @@ class WorkspaceFolderTest(unittest.TestCase):
         self.assertIsNone(rows[other]['project'])
         self.assertTrue(original.exists())
 
+    def test_known_lane_with_registered_sibling_and_retained_build_folders(self):
+        lanes = self.repo.parent / 'app-lanes'
+        active = self.folder(lanes, 'active')
+        old_copy = self.folder(lanes, 'old-copy')
+        keeper = self.folder(self.repo, 'build/retained-worktrees/keeper')
+        elsewhere = self.folder(self.repo.parent, 'other-lanes/old-copy')
+        rows = self.rows([active])
+        self.assertEqual(rows[old_copy]['project'], str(self.repo))
+        self.assertEqual(rows[keeper]['kind'], 'retained')
+        self.assertNotIn(active, rows)
+        self.assertNotIn(elsewhere, rows)
+
     def test_git_pointer_requires_trusted_owner_and_regular_bounded_marker(self):
         folder = self.folder(self.shared, 'actual')
         admin = self.folder(self.repo, '.git/worktrees/actual')

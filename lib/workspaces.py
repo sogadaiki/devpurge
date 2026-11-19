@@ -77,8 +77,9 @@ def collect(paths):
             projects.append(project)
         except (ValueError, OSError) as error:
             errors.append(f'{path} — {error}')
-    registered = {Path(row['path']) for project in projects for row in project['worktrees']}
-    locations = discover([Path(project['repo']) for project in projects], registered) if projects else {'folders': [], 'warnings': []}
+    registered = {Path(project['repo']): {Path(row['path']) for row in project['worktrees']}
+                  for project in projects}
+    locations = discover(list(registered), set().union(*registered.values()), registered) if projects else {'folders': [], 'warnings': []}
     return {'time': datetime.now().astimezone().isoformat(timespec='seconds'),
             'projects': projects, 'folders': locations['folders'],
             'warnings': errors + locations['warnings'], 'failed_projects': len(errors)}
@@ -111,7 +112,10 @@ def groups(report):
         folders = [row for row in report['folders'] if row['project'] == project['repo']]
         extra = sum(not row['primary'] for row in project['worktrees'])
         candidates = [b for b in branches if branch_group(b) == '統合済み・未チェックアウトの整理候補']
-        folder_summary = '登録外フォルダは調査対象外' if project.get('metadata_only') else f'発見した登録外フォルダ {len(folders)} 件'
+        retained = [r for r in folders if r['kind'] == 'retained']
+        unlisted = [r for r in folders if r['kind'] != 'retained']
+        folder_summary = ('登録外フォルダは調査対象外' if project.get('metadata_only')
+                          else f'発見した登録外フォルダ {len(unlisted)} 件 ／ 保持場所の登録外フォルダ {len(retained)} 件')
         summary = (f"追加作業コピー {extra} 件 ／ ローカルブランチ {len(branches)} 本"
                    f" ／ 統合済みブランチ候補 {len(candidates)} 本 ／ {folder_summary}")
         sections = [('登録作業コピー（本体を含む）', list(worktree_lines(project)))]
@@ -129,8 +133,10 @@ def groups(report):
                       '主要・復元用などの保護対象', 'チェックアウト中', '判定できなかったブランチ'):
             if label in by_group:
                 sections.append((label, by_group[label]))
-        if folders:
-            sections.append(('登録外フォルダの所在', folder_lines(folders)))
+        if unlisted:
+            sections.append(('登録外フォルダの所在', folder_lines(unlisted)))
+        if retained:
+            sections.append(('保管済みの作業フォルダ', folder_lines(retained)))
         if project['warnings']:
             sections.append(('確認範囲に関する注意', project['warnings']))
         yield project['repo'], summary, sections

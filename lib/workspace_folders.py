@@ -119,7 +119,7 @@ def _classify(path, owner, admins, fd):
     return 'unlisted-worktree', repo, '管理側と相互参照があります。今回の登録一覧には含まれていません。'
 
 
-def discover(repos: list[Path], registered: set[Path]) -> dict:
+def discover(repos: list[Path], registered: set[Path], registrations_by_repo=None) -> dict:
     """Inventory only the specified repositories and known worktree containers."""
     policy = Studio()
     home = policy.home
@@ -135,6 +135,8 @@ def discover(repos: list[Path], registered: set[Path]) -> dict:
                                         'keychains', 'credentials', 'secrets', 'private keys', 'sadame') or
                     part.casefold().startswith(_CLOUD) for part in path.parts))
 
+    if registrations_by_repo is None:
+        registrations_by_repo = {Path(repos[0]): registered} if len(repos) == 1 else {}
     repos = sorted({Path(p) for p in repos if not blocked(Path(p))})
     if not repos:
         return {'folders': [], 'warnings': ['参照可能な案件がありません。']}
@@ -186,14 +188,25 @@ def discover(repos: list[Path], registered: set[Path]) -> dict:
         rows[path] = {'path': str(path), 'project': str(project) if project else None,
                       'kind': kind, 'reason': reason}
 
-    # Project-specific locations take precedence over discovery in a shared container.
+    def retained(path, repo):
+        rows[path] = {'path': str(path), 'project': str(repo), 'kind': 'retained',
+                      'reason': '案件の保持用フォルダ内に保管されています。用途と保持元は個別に確認してください。'}
+
+    # Only attribute sibling lane containers if their role is evidenced by a registration.
+    attributed_scopes = set()
     for repo in repos:
+        registered_parents = {p.parent for p in registrations_by_repo.get(repo, ()) if p != repo}
         for scope in (repo / '.worktrees', repo / '.claude/worktrees', repo):
             visit(scope, lambda p, f: record(p, f, repo), copies_only=scope == repo)
+        visit(repo / 'build/retained-worktrees', lambda p, f: retained(p, repo))
+        for scope in (repo.parent / (repo.name + '-lanes'), repo.parent / '.worktrees' / repo.name):
+            if scope in registered_parents:
+                attributed_scopes.add(scope)
+                visit(scope, lambda p, f: record(p, f, repo))
 
     shared = {repo.parent / '.worktrees' for repo in repos} | {home / '.worktrees', home / '.codex/worktrees'}
     def shared_entry(path, fd):
-        if path in rows:
+        if path in rows or path in attributed_scopes:
             return
         if _stat(fd, '.git') is not None or _BACKUP.search(path.name) or _COPY.search(path.name):
             record(path, fd, None)
