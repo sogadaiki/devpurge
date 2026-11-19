@@ -25,7 +25,6 @@ final class HeadroomApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.target = self
             button.action = #selector(statusClick(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.setAccessibilityLabel("余白　ストレージとメモリ")
         }
         refresh()
         timer = .scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.refresh() }
@@ -36,8 +35,10 @@ final class HeadroomApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func refresh() {
         model.tick()
         let space = model.vitals.diskFree.map { String(format: "%.0f GB", Double($0) / 1e9) } ?? "未計測"
-        statusItem.button?.title = " \(space)  ·  RAM \(model.vitals.pressure.label)"
-        statusItem.button?.toolTip = "内蔵SSDの空き \(space)　メモリ圧 \(model.vitals.pressure.label)\nクリックして余白を開く"
+        let title = "実空き \(space)  ·  RAM \(model.vitals.pressure.label)"
+        statusItem.button?.title = " \(title)"
+        statusItem.button?.setAccessibilityLabel("余白　\(title)")
+        statusItem.button?.toolTip = "内蔵SSDの実空き \(space)　メモリ圧 \(model.vitals.pressure.label)\nクリックして余白を開く"
     }
 
     @objc private func statusClick(_ sender: NSStatusBarButton) {
