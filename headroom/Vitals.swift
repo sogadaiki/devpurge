@@ -16,6 +16,7 @@ enum MemoryState: Equatable {
 
 struct MachineVitals {
     let diskFree: Int64?
+    let diskAvailableForImportantUsage: Int64?
     let pressure: MemoryState
     let swapUsed: Int64?
     let physicalMemory: Int64
@@ -57,8 +58,11 @@ enum Vitals {
     }
 
     static func read() -> MachineVitals {
+        let dataVolume = URL(fileURLWithPath: "/System/Volumes/Data", isDirectory: true)
         var fs = statfs()
-        let free = statfs("/System/Volumes/Data", &fs) == 0 ? Int64(fs.f_bavail) * Int64(fs.f_bsize) : nil
+        let free = statfs(dataVolume.path, &fs) == 0 ? Int64(fs.f_bavail) * Int64(fs.f_bsize) : nil
+        let capacity = try? dataVolume.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        let estimate = capacity?.volumeAvailableCapacityForImportantUsage.flatMap { $0 >= 0 ? $0 : nil }
         var level: Int32 = 0
         var levelSize = MemoryLayout.size(ofValue: level)
         var pressure = MemoryState.unknown
@@ -73,7 +77,7 @@ enum Vitals {
         var swap = xsw_usage()
         var swapSize = MemoryLayout.size(ofValue: swap)
         let used = sysctlbyname("vm.swapusage", &swap, &swapSize, nil, 0) == 0 ? Int64(swap.xsu_used) : nil
-        return MachineVitals(diskFree: free, pressure: pressure, swapUsed: used,
+        return MachineVitals(diskFree: free, diskAvailableForImportantUsage: estimate, pressure: pressure, swapUsed: used,
                              physicalMemory: Int64(ProcessInfo.processInfo.physicalMemory), freeMemory: freeRAM())
     }
 

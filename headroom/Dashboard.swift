@@ -21,8 +21,11 @@ struct Dashboard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 32) {
-                metric("内蔵SSDの空き", icon: "internaldrive", value: quantity(model.vitals.diskFree))
+            HStack(spacing: 20) {
+                metric("内蔵SSDの実空き", icon: "internaldrive", value: quantity(model.vitals.diskFree))
+                Divider().frame(height: 38)
+                metric("macOSの利用可能見込み", icon: "internaldrive", value: quantity(model.vitals.diskAvailableForImportantUsage))
+                    .help("実空きに加え、必要に応じて解放できる領域を含めてmacOSが見積もった容量です。")
                 Divider().frame(height: 38)
                 metric("メモリ負荷", icon: "memorychip", value: model.vitals.pressure.label,
                        color: pressureColor)
