@@ -46,6 +46,8 @@ def branch_group(row):
     if row['protected']:
         return '主要・復元用などの保護対象'
     if row['merged'] is True:
+        if row.get('upstream_configured') is not False and row.get('upstream_merged') is not True:
+            return '既定ブランチには統合済み・追跡先を要確認'
         return '統合済み・未チェックアウトの整理候補'
     if row['merged'] is False:
         return '統合を確認できていないブランチ'
@@ -112,12 +114,13 @@ def groups(report):
         folders = [row for row in report['folders'] if row['project'] == project['repo']]
         extra = sum(not row['primary'] for row in project['worktrees'])
         candidates = [b for b in branches if branch_group(b) == '統合済み・未チェックアウトの整理候補']
+        review_upstream = [b for b in branches if branch_group(b) == '既定ブランチには統合済み・追跡先を要確認']
         retained = [r for r in folders if r['kind'] == 'retained']
         unlisted = [r for r in folders if r['kind'] != 'retained']
         folder_summary = ('登録外フォルダは調査対象外' if project.get('metadata_only')
                           else f'発見した登録外フォルダ {len(unlisted)} 件 ／ 保持場所の登録外フォルダ {len(retained)} 件')
         summary = (f"追加作業コピー {extra} 件 ／ ローカルブランチ {len(branches)} 本"
-                   f" ／ 統合済みブランチ候補 {len(candidates)} 本 ／ {folder_summary}")
+                   f" ／ 統合済みブランチ候補 {len(candidates)} 本 ／ 追跡先の確認待ち {len(review_upstream)} 本 ／ {folder_summary}")
         sections = [('登録作業コピー（本体を含む）', list(worktree_lines(project)))]
         pending = [r['path'] for r in project['worktrees'] if r['review_for_retirement']]
         if pending:
@@ -128,8 +131,11 @@ def groups(report):
             value = branch['name']
             if label == '統合済み・未チェックアウトの整理候補':
                 value += '  ' + branch['head']
+            elif label == '既定ブランチには統合済み・追跡先を要確認':
+                value += '  ' + (branch.get('upstream') or '追跡先を特定できません')
             by_group.setdefault(label, []).append(value)
-        for label in ('統合済み・未チェックアウトの整理候補', '統合を確認できていないブランチ',
+        for label in ('統合済み・未チェックアウトの整理候補', '既定ブランチには統合済み・追跡先を要確認',
+                      '統合を確認できていないブランチ',
                       '主要・復元用などの保護対象', 'チェックアウト中', '判定できなかったブランチ'):
             if label in by_group:
                 sections.append((label, by_group[label]))

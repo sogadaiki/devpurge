@@ -197,6 +197,51 @@ def _retained(repo, warnings):
     return retained
 
 
+def _upstream_config(repo, warnings):
+    """Look up which branches declare tracking, even when Git cannot map their remote ref."""
+    try:
+        result = _git(repo, 'config', '--null', '--name-only', '--get-regexp',
+                      r'^branch\..*\.(remote|merge)$', allow=(0, 1))
+    except InventoryError:
+        warnings.append('ブランチの追跡設定を照合できません。')
+        return None
+    configured = {}
+    for key in result.stdout.split(b'\0'):
+        if key:
+            name, _, field = os.fsdecode(key).removeprefix('branch.').rpartition('.')
+            configured.setdefault(name, []).append(field)
+    return configured
+
+
+def _upstream_ancestry(repo, branches, shallow, configured):
+    candidates = [b for b in branches if b['merged'] is True and not b['checked_out'] and not b['protected']
+                  and b['upstream'] and configured is not None
+                  and sorted(configured.get(b['name'], [])) == ['merge', 'remote']]
+    targets = {b['upstream'] for b in candidates}
+    if not targets:
+        return
+    # Resolve all cached tracking refs in one read, then compare immutable object IDs.
+    out = _git(repo, 'for-each-ref', '--format=%(refname)%00%(objectname)', *sorted(targets)).stdout
+    cached = {}
+    for line in out.splitlines():
+        ref, _, oid = line.partition(b'\0')
+        if os.fsdecode(ref) in targets and re.fullmatch(rb'[0-9a-f]{40}|[0-9a-f]{64}', oid):
+            cached[os.fsdecode(ref)] = os.fsdecode(oid)
+    ancestry = {}
+    for row in candidates:
+        target = cached.get(row['upstream'])
+        if target is None:
+            continue
+        pair = (row['head'], target)
+        if pair not in ancestry:
+            try:
+                included = pair[0] == pair[1] or _git(repo, 'merge-base', '--is-ancestor', *pair, allow=(0, 1)).returncode == 0
+                ancestry[pair] = True if included else (None if shallow else False)
+            except InventoryError:
+                ancestry[pair] = None
+        row['upstream_merged'] = ancestry[pair]
+
+
 def inventory(repo: Path) -> dict:
     repo = Path(repo)
     if not repo.is_absolute():
@@ -232,11 +277,14 @@ def inventory(repo: Path) -> dict:
 
     # Branch names cannot contain LF. Use full ref names even when a tag shadows a branch.
     refs = {}
-    for line in _git(repo, 'for-each-ref', '--format=%(refname)%00%(objectname)', 'refs/heads/').stdout.splitlines():
-        name, sep, head = line.partition(b'\0')
-        if not sep or not name.startswith(b'refs/heads/') or not re.fullmatch(rb'[0-9a-f]{40,64}', head):
+    upstreams = {}
+    for line in _git(repo, 'for-each-ref', '--format=%(refname)%00%(objectname)%00%(upstream)', 'refs/heads/').stdout.splitlines():
+        fields = line.split(b'\0')
+        if len(fields) != 3 or not fields[0].startswith(b'refs/heads/') or not re.fullmatch(rb'[0-9a-f]{40}|[0-9a-f]{64}', fields[1]):
             raise InventoryError('ローカルブランチの一覧を照合できません。')
+        name, head, upstream = fields
         refs[os.fsdecode(name)] = os.fsdecode(head)
+        upstreams[os.fsdecode(name)] = os.fsdecode(upstream) or None
     remote = _git(repo, 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD', allow=(0, 1))
     origin = os.fsdecode(remote.stdout.removesuffix(b'\n')) if remote.returncode == 0 else None
     default = origin.removeprefix('refs/remotes/origin/') if origin else None
@@ -264,12 +312,19 @@ def inventory(repo: Path) -> dict:
         warnings.append('既定ブランチへの統合状態を確定できません。')
     checked_out = {row['branch'] for row in worktrees}
     retained = _retained(repo, warnings)
+    configured = _upstream_config(repo, warnings)
     branches = []
     for ref, head in refs.items():
         name = ref.removeprefix('refs/heads/')
         included = None if merged is None else (True if head in merged else (None if shallow else False))
         branches.append({'name': name, 'head': head, 'checked_out': name in checked_out, 'merged': included,
+                         'upstream': upstreams[ref], 'upstream_merged': None,
+                         'upstream_configured': True if upstreams[ref] else (None if configured is None else name in configured),
                          'protected': metadata_only or ref == base or name in ('main', 'master', 'develop', default)
                          or retained is None or name in retained})
+    try:
+        _upstream_ancestry(repo, branches, shallow, configured)
+    except InventoryError:
+        warnings.append('キャッシュされた追跡先を確認できません。')
     return {'repo': str(repo), 'base': base, 'metadata_only': metadata_only,
             'worktrees': worktrees, 'branches': branches, 'warnings': warnings}

@@ -39,10 +39,10 @@ def _snapshot(repo, name, sha, base):
     require(full != base and (not origin or origin.removeprefix('refs/remotes/origin/') != name)
             and name not in ('main', 'master', 'develop'), '主要ブランチは保持します。')
     upstream = _value(repo, 'for-each-ref', '--format=%(upstream)', full)
-    if not upstream:
-        for field in ('remote', 'merge'):
-            require(_git(repo, 'config', '--get', f'branch.{name}.{field}', allow=(0, 1)).returncode == 1,
-                    '設定された追跡先を照合できません。')
+    for field in ('remote', 'merge'):
+        settings = _git(repo, 'config', '--null', '--get-all', f'branch.{name}.{field}', allow=(0, 1))
+        require(settings.stdout.count(b'\0') == (1 if upstream else 0),
+                '設定された追跡先を一つに確定できません。')
     refs = {ref for ref in (base, origin, upstream) if ref}
     heads = {}
     for ref in refs:
@@ -92,6 +92,8 @@ def retire_branch(repo: Path, name: str, expected_sha: str) -> dict:
             return {'status': 'held', 'reason': 'ブランチは既に存在しません。復元用コミットを確認しました。', 'restore_command': restore}
         require(row['head'] == expected_sha and not row['protected'] and not row['checked_out'] and row['merged'] is True,
                 '先端の相違・保護・使用中・統合未確認のいずれかにより保持します。')
+        require(row['upstream_configured'] is False or row['upstream_merged'] is True,
+                '追跡先への統合を確認できません。')
         base = result['base']
         targets = _snapshot(repo, name, expected_sha, base)
         hook_name = 'devpurge-branch-' + uuid.uuid4().hex

@@ -160,6 +160,35 @@ class GitInventoryTest(unittest.TestCase):
             report = inventory(self.repo)
         self.assertTrue(all(b['protected'] for b in report['branches']))
 
+    def test_default_and_tracking_branch_ancestry_are_separate(self):
+        first = self.git('rev-parse', 'HEAD')
+        self.git('remote', 'add', 'origin', str(self.root / 'offline-remote.git'))
+        self.git('commit', '-qm', 'second', '--allow-empty')
+        latest = self.git('rev-parse', 'HEAD')
+        self.git('update-ref', 'refs/remotes/origin/main', latest)
+        self.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+        for branch, remote in [('ready', latest), ('behind-local', first), ('gone', first)]:
+            self.git('branch', branch, latest)
+            self.git('update-ref', 'refs/remotes/origin/' + branch, remote)
+            self.git('branch', '--set-upstream-to=origin/' + branch, branch)
+        self.git('update-ref', '-d', 'refs/remotes/origin/gone')
+        self.git('branch', 'no-upstream')
+        self.git('branch', 'unknown-remote')
+        self.git('config', 'branch.unknown-remote.remote', 'absent')
+        self.git('config', 'branch.unknown-remote.merge', 'refs/heads/not-fetched')
+        self.git('branch', 'ambiguous')
+        self.git('branch', '--set-upstream-to=origin/main', 'ambiguous')
+        self.git('config', '--add', 'branch.ambiguous.merge', 'refs/heads/ready')
+        rows = {row['name']: row for row in inventory(self.repo)['branches']}
+        self.assertTrue(all(row['merged'] for row in rows.values()))
+        self.assertTrue(rows['ready']['upstream_merged'])
+        self.assertEqual(rows['behind-local']['upstream'], 'refs/remotes/origin/behind-local')
+        self.assertFalse(rows['behind-local']['upstream_merged'])
+        self.assertFalse(rows['no-upstream']['upstream_configured'])
+        for branch in ['unknown-remote', 'gone', 'ambiguous']:
+            self.assertTrue(rows[branch]['upstream_configured'])
+            self.assertIsNone(rows[branch]['upstream_merged'])
+
 
 if __name__ == '__main__':
     unittest.main()
