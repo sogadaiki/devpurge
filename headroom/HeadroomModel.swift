@@ -2,11 +2,13 @@ import AppKit
 import SwiftUI
 
 enum Area: String, CaseIterable {
-    case disk = "ストレージ", project = "案件別", memory = "メモリ"
+    case disk = "ストレージ", project = "案件別", workspaces = "作業コピー", memory = "メモリ"
 }
 
 final class HeadroomModel: ObservableObject {
-    @Published var page: Area = .disk
+    @Published var page: Area = Area(rawValue: UserDefaults.standard.string(forKey: "dashboardArea") ?? "") ?? .disk {
+        didSet { UserDefaults.standard.set(page.rawValue, forKey: "dashboardArea") }
+    }
     @Published private(set) var vitals = Vitals.read()
     @Published private(set) var groups = [DiskGroup]()
     @Published private(set) var apps = [MemoryApp]()

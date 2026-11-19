@@ -17,7 +17,8 @@ def main():
             if module == "Vitals" and not gui:
                 continue
             flags = ["-D", "DISKCARE_TESTING"] if module == "DiskCare" else []
-            swift_file = "WorkspaceScan" if module == "Workspace" else "SimulatorCare" if module == "Simulator" else module
+            swift_file = {"Workspace": "WorkspaceScan", "Simulator": "SimulatorCare",
+                          "Inventory": "WorkspaceInventory"}.get(module, module)
             binary = Path(temp) / test.stem
             subprocess.run(["xcrun", "swiftc", "-swift-version", "5", *flags,
                             source / (swift_file + ".swift"), test, "-o", binary], check=True)

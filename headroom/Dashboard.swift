@@ -14,6 +14,7 @@ private struct Selection: Identifiable {
 
 struct Dashboard: View {
     @ObservedObject var model: HeadroomModel
+    @StateObject private var workspaceBrowserModel = WorkspaceBrowserModel()
     @State private var confirmed: Confirmation?
     @State private var selection: Selection?
 
@@ -40,9 +41,10 @@ struct Dashboard: View {
             switch model.page {
             case .disk: disk
             case .project: project
+            case .workspaces: WorkspaceBrowser(model: workspaceBrowserModel)
             case .memory: memory
             }
-            if !model.busy.isEmpty {
+            if !model.busy.isEmpty && model.page != .workspaces {
                 HStack { ProgressView().controlSize(.small); Text(model.busy).font(.callout) }
                     .accessibilityElement(children: .combine)
             }
