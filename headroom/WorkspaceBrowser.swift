@@ -46,6 +46,8 @@ final class WorkspaceBrowserModel: ObservableObject {
     @Published fileprivate var selectedRepo: String?
     @Published fileprivate var outcome: WorkspaceResult?
     @Published fileprivate var manualProject: String?
+    @Published fileprivate var canCancelRead = false
+    private var cancelled = false
     private static let scopeKey = "workspaceBrowser.selectedProject"
     private var attempted = false
     private let queue = DispatchQueue(label: "jp.devpurge.headroom.workspaces", qos: .userInitiated)
@@ -73,8 +75,9 @@ final class WorkspaceBrowserModel: ObservableObject {
         let projects = manualProject.map { [$0] } ?? []
         guard busy.isEmpty else { return }
         attempted = true
+        let token = WorkspaceInventory.readToken()
         run("Gitの登録と作業フォルダを確認中…\nmacOSの「デスクトップ」へのアクセス確認が表示されたら選択してください。",
-            operation: { try WorkspaceInventory.scan(projects: projects) }) { report in
+            operation: { try WorkspaceInventory.scan(projects: projects, readToken: token) }) { report in
             self.report = report
             if let chosen = projects.first, report.failedProjects == 0,
                report.projects.contains(where: { $0.repo == chosen }) {
@@ -84,15 +87,27 @@ final class WorkspaceBrowserModel: ObservableObject {
         }
     }
 
-    private func run<Value>(_ label: String, operation: @escaping () throws -> Value, failed: ((Error) -> Void)? = nil,
+    fileprivate func cancelRead() {
+        guard canCancelRead else { return }
+        cancelled = true
+        canCancelRead = false
+        busy = "読み取りをキャンセル中…"
+        WorkspaceInventory.cancelReads()
+    }
+
+    private func run<Value>(_ label: String, readOnly: Bool = true, operation: @escaping () throws -> Value, failed: ((Error) -> Void)? = nil,
                             completed: @escaping (Value) -> Void) {
         guard busy.isEmpty else { return }
         busy = label
+        canCancelRead = readOnly
+        cancelled = false
         error = ""
         queue.async {
             let result = Result { try operation() }
             DispatchQueue.main.async {
                 self.busy = ""
+                self.canCancelRead = false
+                if self.cancelled { return }
                 switch result {
                 case .success(let value): completed(value)
                 case .failure(let failure):
@@ -104,8 +119,9 @@ final class WorkspaceBrowserModel: ObservableObject {
     }
 
     fileprivate func check(_ row: InventoryWorktree, in project: InventoryProject) {
+        let token = WorkspaceInventory.readToken()
         run("選んだ作業コピーの保存内容と利用状況を照合中…",
-            operation: { try WorkspaceInventory.check(project: project.repo, worktree: row.path) }) { receipt in
+            operation: { try WorkspaceInventory.check(project: project.repo, worktree: row.path, readToken: token) }) { receipt in
             let eligible = receipt.status == "eligible"
             let next: WorkspaceTarget?
             if eligible, let branch = receipt.branch, let head = receipt.head, branch == row.branch, head == row.head {
@@ -124,7 +140,7 @@ final class WorkspaceBrowserModel: ObservableObject {
 
     fileprivate func retire(_ target: WorkspaceTarget) {
         outcome = nil
-        run("対象を再検証して整理中…", operation: {
+        run("対象を再検証して整理中…", readOnly: false, operation: {
             switch target {
             case let .worktree(repo, path, branch, head):
                 return try WorkspaceInventory.retire(project: repo, worktree: path, branch: branch, head: head)
@@ -149,8 +165,9 @@ final class WorkspaceBrowserModel: ObservableObject {
     }
 
     fileprivate func compare(copy: String, keeper: String) {
+        let token = WorkspaceInventory.readToken()
         run("コピーと保持先の内容を比較中…", operation: {
-            try WorkspaceInventory.compare(copy: copy, keeper: keeper)
+            try WorkspaceInventory.compare(copy: copy, keeper: keeper, readToken: token)
         }) { result in
             let title: String
             switch result.status {
@@ -229,8 +246,12 @@ struct WorkspaceBrowser: View {
                 Text("「操作」からGitの案件を選択できます。").foregroundStyle(.secondary)
             }
             if !model.busy.isEmpty {
-                HStack { ProgressView().controlSize(.small); Text(model.busy).font(.callout) }
-                    .accessibilityElement(children: .combine)
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text(model.busy).font(.callout)
+                    Spacer()
+                    if model.canCancelRead { Button("キャンセル", action: model.cancelRead) }
+                }
             }
             if let reportFile = savedReport {
                 Button("保存済みの登録案件レポートを開く") { NSWorkspace.shared.open(reportFile) }

@@ -79,6 +79,11 @@ final class HeadroomApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let ready = WorkspaceInventory.prepareForQuit { sender.reply(toApplicationShouldTerminate: true) }
+        return ready ? .terminateNow : .terminateLater
+    }
 }
 
 let application = NSApplication.shared

@@ -2,6 +2,92 @@ import Foundation
 
 @main
 struct InventoryTests {
+    static func checkLifecycle(home: URL) throws {
+        let fixture = home.appendingPathComponent("lifecycle.py")
+        try """
+        import json, os, pathlib, subprocess, sys, time
+        mode, marker = sys.argv[1], pathlib.Path(sys.argv[2])
+        if mode == "read":
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(12)"])
+            marker.write_text(str(child.pid))
+            child.wait()
+        elif mode == "write":
+            marker.write_text(str(os.getpid()))
+            deadline = time.monotonic() + 10
+            while not marker.with_suffix(".release").exists() and time.monotonic() < deadline:
+                time.sleep(.02)
+        print(json.dumps({"status":mode,"reason":"test"}))
+        """.write(to: fixture, atomically: true, encoding: .utf8)
+
+        func waitFor(_ condition: () -> Bool) -> Bool {
+            let end = Date().addingTimeInterval(5)
+            while !condition() && Date() < end {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            return condition()
+        }
+        func launch(_ mode: String, tracker: InventoryProcesses, marker: URL) -> DispatchGroup {
+            let group = DispatchGroup()
+            DispatchQueue.global().async(group: group) {
+                do {
+                    let receipt: InventoryReceipt = try WorkspaceInventory.run([mode, marker.path], accepting: [0],
+                        writing: mode == "write", tracker: tracker, script: fixture, home: home)
+                    precondition(mode == "write" && receipt.status == mode, "Read was not cancelled")
+                } catch {
+                    precondition(mode == "read", "A started write was interrupted")
+                }
+            }
+            return group
+        }
+
+        let manual = InventoryProcesses()
+        let old = manual.readToken()
+        let marker = home.appendingPathComponent("manual-job")
+        let reading = launch("read", tracker: manual, marker: marker)
+        precondition(waitFor { (try? String(contentsOf: marker, encoding: .utf8)).flatMap(Int32.init) != nil })
+        let child = try Int32(String(contentsOf: marker, encoding: .utf8))!
+        manual.cancelReads()
+        precondition(reading.wait(timeout: .now() + 4) == .success)
+        precondition(waitFor { kill(child, 0) == -1 && errno == ESRCH })
+        do {
+            let _: InventoryReceipt = try WorkspaceInventory.run(["done", marker.path], accepting: [0],
+                readToken: old, tracker: manual, script: fixture, home: home)
+            preconditionFailure("A queued read survived cancellation")
+        } catch { precondition(error.localizedDescription.contains("中止")) }
+        let restarted: InventoryReceipt = try WorkspaceInventory.run(["done", marker.path], accepting: [0],
+            readToken: manual.readToken(), tracker: manual, script: fixture, home: home)
+        precondition(restarted.status == "done")
+
+        for withWrite in [false, true] {
+            let tracker = InventoryProcesses()
+            let readMarker = home.appendingPathComponent("read-\(withWrite)")
+            let writeMarker = home.appendingPathComponent("write-\(withWrite)")
+            let read = launch("read", tracker: tracker, marker: readMarker)
+            let write = withWrite ? launch("write", tracker: tracker, marker: writeMarker) : nil
+            precondition(waitFor { (try? String(contentsOf: readMarker, encoding: .utf8)).flatMap(Int32.init) != nil &&
+                (!withWrite || FileManager.default.fileExists(atPath: writeMarker.path)) })
+            let child = try Int32(String(contentsOf: readMarker, encoding: .utf8))!
+            var notified = false
+            let quitNow = tracker.prepareForQuit { precondition(Thread.isMainThread); notified = true }
+            precondition(quitNow == !withWrite && !notified)
+            precondition(read.wait(timeout: .now() + 4) == .success)
+            precondition(waitFor { kill(child, 0) == -1 && errno == ESRCH })
+            for writing in [false, true] {
+                do {
+                    let _: InventoryReceipt = try WorkspaceInventory.run(["done", readMarker.path], accepting: [0],
+                        writing: writing, tracker: tracker, script: fixture, home: home)
+                    preconditionFailure("A new job started during quit")
+                } catch { precondition(error.localizedDescription.contains("終了")) }
+            }
+            if let write {
+                precondition(write.wait(timeout: .now()) == .timedOut && !notified)
+                try Data().write(to: writeMarker.appendingPathExtension("release"))
+                precondition(write.wait(timeout: .now() + 4) == .success)
+                precondition(waitFor { notified })
+            }
+        }
+    }
+
     static func main() throws {
         let files = FileManager.default
         guard let resolved = realpath(files.temporaryDirectory.path, nil) else { throw POSIXError(.ENOENT) }
@@ -74,6 +160,7 @@ struct InventoryTests {
             preconditionFailure("Invalid exit code accepted")
         } catch { precondition(!error.localizedDescription.isEmpty) }
 
+        try checkLifecycle(home: home)
         try files.removeItem(at: policy)
         try files.createSymbolicLink(at: policy, withDestinationURL: home.appendingPathComponent("missing"))
         do {
@@ -81,6 +168,6 @@ struct InventoryTests {
                 accepting: [0, 1], script: source, home: home)
             preconditionFailure("Dangling policy link accepted")
         } catch { precondition(error.localizedDescription.contains(".devpurgerc")) }
-        print("PASS configured, selected, partial and protected inventories, held results, comparisons and process output")
+        print("PASS inventories, receipts, comparisons, process output, cancellation and safe quit")
     }
 }

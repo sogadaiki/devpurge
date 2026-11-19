@@ -89,6 +89,82 @@ private struct InventoryError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+struct InventoryReadToken {
+    fileprivate let generation: UInt64
+}
+
+final class InventoryProcesses {
+    private let lock = NSLock()
+    private var jobs: [ObjectIdentifier: (process: Process, writing: Bool)] = [:]
+    private var generation: UInt64 = 0
+    private var quitting = false
+    private var afterWrites: (() -> Void)?
+
+    func readToken() -> InventoryReadToken {
+        lock.lock()
+        defer { lock.unlock() }
+        return InventoryReadToken(generation: generation)
+    }
+
+    func check(_ token: InventoryReadToken) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try checkLocked(token)
+    }
+
+    private func checkLocked(_ token: InventoryReadToken?) throws {
+        guard !quitting else { throw InventoryError(message: "余白の終了処理中です。") }
+        if let token, token.generation != generation { throw InventoryError(message: "読み取りを中止しました。") }
+    }
+
+    func start(_ process: Process, readToken: InventoryReadToken?) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try checkLocked(readToken)
+        do { try process.run() } catch {
+            throw InventoryError(message: "調査機能を起動できません。Xcode Command Line Tools の Python 3 を確認してください。")
+        }
+        jobs[ObjectIdentifier(process)] = (process, readToken == nil)
+    }
+
+    func finish(_ process: Process) {
+        lock.lock()
+        jobs.removeValue(forKey: ObjectIdentifier(process))
+        let notify = jobs.values.contains(where: { $0.writing }) ? nil : afterWrites
+        if notify != nil { afterWrites = nil }
+        lock.unlock()
+        if let notify { DispatchQueue.main.async(execute: notify) }
+    }
+
+    private func cancelReadsLocked() {
+        generation &+= 1
+        for job in jobs.values where !job.writing && job.process.isRunning {
+            let pid = job.process.processIdentifier
+            guard pid > 1 else { continue }
+            // Darwin Foundation launches Process in its own process group. Check ownership
+            // before signalling the helper and its Git/inspection children, including
+            // helpers blocked on a macOS privacy prompt.
+            if getpgid(pid) == pid { kill(-pid, SIGKILL) } else { kill(pid, SIGKILL) }
+        }
+    }
+
+    func cancelReads() {
+        lock.lock()
+        defer { lock.unlock() }
+        cancelReadsLocked()
+    }
+
+    func prepareForQuit(afterWrites: @escaping () -> Void) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        quitting = true
+        cancelReadsLocked()
+        guard jobs.values.contains(where: { $0.writing }) else { return true }
+        if self.afterWrites == nil { self.afterWrites = afterWrites }
+        return false
+    }
+}
+
 // Drain both pipes while the helper is running. Either stream can exceed the pipe buffer.
 private final class InventoryDiagnostics {
     private var tail = Data()
@@ -113,29 +189,43 @@ private final class InventoryDiagnostics {
 }
 
 enum WorkspaceInventory {
-    static func scan(projects: [String] = []) throws -> InventoryReport {
-        try run(["--json"] + (projects.isEmpty ? ["--configured-only"] : ["--"] + projects), accepting: [0, 1])
+    private static let processes = InventoryProcesses()
+
+    static func readToken() -> InventoryReadToken { processes.readToken() }
+    static func cancelReads() { processes.cancelReads() }
+    static func prepareForQuit(afterWrites: @escaping () -> Void) -> Bool {
+        processes.prepareForQuit(afterWrites: afterWrites)
     }
 
-    static func check(project: String, worktree: String) throws -> InventoryReceipt {
-        try run(["--json", "--check-worktree", worktree, "--", project], accepting: [0, 1])
+    static func scan(projects: [String] = [], readToken: InventoryReadToken? = nil) throws -> InventoryReport {
+        try run(["--json"] + (projects.isEmpty ? ["--configured-only"] : ["--"] + projects),
+                accepting: [0, 1], readToken: readToken)
+    }
+
+    static func check(project: String, worktree: String, readToken: InventoryReadToken? = nil) throws -> InventoryReceipt {
+        try run(["--json", "--check-worktree", worktree, "--", project], accepting: [0, 1], readToken: readToken)
     }
 
     static func retire(project: String, worktree: String, branch: String, head: String) throws -> InventoryReceipt {
-        try run(["--json", "--retire", worktree, "--expect-worktree", branch, head, "--", project], accepting: [0, 1])
+        try run(["--json", "--retire", worktree, "--expect-worktree", branch, head, "--", project],
+                accepting: [0, 1], writing: true)
     }
 
     static func retireBranch(project: String, branch: String, head: String) throws -> InventoryReceipt {
-        try run(["--json", "--retire-branch", branch, head, "--", project], accepting: [0, 1])
+        try run(["--json", "--retire-branch", branch, head, "--", project], accepting: [0, 1], writing: true)
     }
 
-    static func compare(copy: String, keeper: String) throws -> InventoryComparison {
-        try run(["--json", "--compare", copy, keeper], accepting: [0, 1, 2])
+    static func compare(copy: String, keeper: String, readToken: InventoryReadToken? = nil) throws -> InventoryComparison {
+        try run(["--json", "--compare", copy, keeper], accepting: [0, 1, 2], readToken: readToken)
     }
 
     static func run<T: Decodable>(_ arguments: [String], accepting statuses: Set<Int32>,
+                                  writing: Bool = false, readToken: InventoryReadToken? = nil,
+                                  tracker: InventoryProcesses = processes,
                                   script: URL? = Bundle.main.url(forResource: "workspaces", withExtension: "py", subdirectory: "devpurge/lib"),
                                   home: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> T {
+        let token = writing ? nil : readToken ?? tracker.readToken()
+        if let token { try tracker.check(token) }
         guard let script else { throw InventoryError(message: "調査機能が見つかりません。余白を再インストールしてください。") }
         let policy = home.appendingPathComponent(".devpurgerc").path
         var info = stat()
@@ -156,15 +246,15 @@ enum WorkspaceInventory {
         let output = Pipe(), errors = Pipe()
         process.standardOutput = output
         process.standardError = errors
-        do { try process.run() } catch {
-            throw InventoryError(message: "調査機能を起動できません。Xcode Command Line Tools の Python 3 を確認してください。")
-        }
+        try tracker.start(process, readToken: token)
+        defer { tracker.finish(process) }
         let diagnostics = InventoryDiagnostics()
         let reader = DispatchWorkItem { diagnostics.drain(errors.fileHandleForReading) }
         DispatchQueue.global(qos: .utility).async(execute: reader)
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         reader.wait()
+        if let token { try tracker.check(token) }
         guard process.terminationReason == .exit, statuses.contains(process.terminationStatus) else {
             throw InventoryError(message: diagnostics.message ?? "操作の結果を取得できません。案件を再読み込みして状態を確認してください。")
         }
