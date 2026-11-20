@@ -89,6 +89,24 @@ class ProjectIndex(unittest.TestCase):
         missing = self.row('release.txt')
         self.assertTrue(missing['recorded'])
         self.assertIn('実物', missing['detail'])
+        self.assertEqual(missing['backup_inclusion'], 'unknown')
+
+    def test_live_backup_policy_uses_exact_paths_in_bounded_batches(self):
+        paths = [self.root / f'作業 {i}' for i in range(65)]
+        def query(args, **kwargs):
+            self.assertGreater(kwargs['timeout'], 0)
+            self.assertEqual(args[:2], ['/usr/bin/tmutil', 'isexcluded'])
+            if args[2] == os.fsencode(paths[-1]):
+                raise subprocess.TimeoutExpired(args, 2)
+            rows = [b'[Excluded]  ' + os.fsencode(paths[1]), b'[Included]  ' + os.fsencode(paths[0]),
+                    b'[UNKNOWN]   ' + os.fsencode(paths[2]), b'[Included]  /different/project']
+            return subprocess.CompletedProcess(args, 0, b'\n'.join(rows))
+        with patch.object(index.sys, 'platform', 'darwin'), patch.object(subprocess, 'run', side_effect=query) as run:
+            self.assertEqual(index.backup_inclusions(paths), {paths[0]: 'included', paths[1]: 'excluded'})
+        self.assertEqual(run.call_count, 2)
+        with patch.object(index.sys, 'platform', 'linux'), patch.object(subprocess, 'run') as run:
+            self.assertEqual(index.backup_inclusions(paths), {})
+            run.assert_not_called()
 
     def test_verification_is_live_and_does_not_persist_permission(self):
         self.record('trial.txt', 'copy', '--keeper', 'release.txt')
