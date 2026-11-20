@@ -19,9 +19,11 @@ def main():
             flags = ["-D", "DISKCARE_TESTING"] if module == "DiskCare" else []
             swift_file = {"Workspace": "WorkspaceScan", "Simulator": "SimulatorCare",
                           "Inventory": "WorkspaceInventory"}.get(module, module)
+            dependencies = {"BackupMonitor": ["BackupProbe"], "BackupHistory": ["BackupMonitor", "BackupProbe"]}
+            sources = [source / (name + ".swift") for name in [swift_file, *dependencies.get(module, [])]]
             binary = Path(temp) / test.stem
             subprocess.run(["xcrun", "swiftc", "-swift-version", "5", *flags,
-                            source / (swift_file + ".swift"), test, "-o", binary], check=True)
+                            *sources, test, "-o", binary], check=True)
             subprocess.run([binary], check=True)
 
 

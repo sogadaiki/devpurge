@@ -8,7 +8,9 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import subprocess
 import sys
+import time
 import unicodedata
 
 from studio import Studio
@@ -210,11 +212,43 @@ def overlaps_kept(path, scopes):
     return path in kept or path in containers or any(parent in kept for parent in path.parents)
 
 
+def backup_inclusions(paths):
+    """Current Time Machine policy for each item itself, never a backup receipt."""
+    statuses = {}
+    if sys.platform != 'darwin':
+        return statuses
+    # tmutil's text form distinguishes UNKNOWN from Included. Its -X form can
+    # return IsExcluded=0 even when it cannot establish the item's status.
+    paths = [p for p in paths if '\n' not in str(p) and '\r' not in str(p)]
+    deadline = time.monotonic() + 5
+    for start in range(0, len(paths), 64):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        batch = {os.fsencode(p): p for p in paths[start:start + 64]}
+        try:
+            response = subprocess.run(['/usr/bin/tmutil', 'isexcluded', *batch],
+                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                      timeout=remaining, check=False,
+                                      env={**os.environ, 'LC_ALL': 'C'})
+        except (OSError, subprocess.TimeoutExpired):
+            break
+        if response.returncode != 0:
+            continue
+        for line in response.stdout.split(b'\n'):
+            tag, _, name = line.partition(b']')
+            path = batch.get(name.lstrip(b' \t'))
+            if path is not None and tag in (b'[Included', b'[Excluded'):
+                statuses[path] = 'included' if tag == b'[Included' else 'excluded'
+    return statuses
+
+
 def report(root, fd, policy, records):
     warnings = []
     discovered = discover(root, fd, policy, records, warnings)
     protected = protected_scopes(root, records, policy)
     rows = []
+    present = []
     for path in sorted(records.keys() | discovered):
         row = records.get(path)
         # Respect newly added exclusions even when a previous record contains notes.
@@ -234,12 +268,14 @@ def report(root, fd, policy, records):
             decision, detail = 'keep', '原本・納品物・復元用データ・保管場所の保持範囲に重なるため保持します。'
         if row:
             try:
-                location(root, Path(path), policy)
+                present.append(location(root, Path(path), policy))
             except (OSError, ValueError):
                 detail = '登録時の場所に実物を確認できません。移動・権限・リンクを確認してください。'
+        else:
+            present.append(root / path)  # discover() checked this entry's location.
         values = row or dict(path=path, role='unknown', owner='', reason='', keeper=None, until=None, rebuild=None)
         rows.append(dict(values, recorded=row is not None, revision=revision(row), decision=decision, detail=detail))
-    return {'root': str(root), 'entries': rows, 'warnings': list(dict.fromkeys(warnings))}
+    return {'root': str(root), 'entries': rows, 'warnings': list(dict.fromkeys(warnings))}, present
 
 
 def store(root, fd, records, old):
@@ -322,10 +358,14 @@ def execute(args):
                 location(root, relative(values['keeper']), policy)
             require(args.expected == revision(records.get(path)), 'この項目は更新されています。一覧を再読込して確認してください。')
             records[path] = values
-            result = report(root, fd, policy, records)
+        result, present = report(root, fd, policy, records)
+        if args.action == 'record':
             store(root, fd, records, old)
-            return result
-        return report(root, fd, policy, records)
+    # No network or OS service lookup while holding the project's metadata lock.
+    inclusions = backup_inclusions(present)
+    for row in result['entries']:
+        row['backup_inclusion'] = inclusions.get(root / row['path'], 'unknown')
+    return result
 
 
 class Arguments(argparse.ArgumentParser):

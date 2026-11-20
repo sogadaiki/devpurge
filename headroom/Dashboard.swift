@@ -31,6 +31,7 @@ struct Dashboard: View {
                        color: pressureColor)
                 Spacer()
             }
+            BackupSummary(monitor: model.backup)
             Picker("表示", selection: $model.page) {
                 ForEach(Area.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }.pickerStyle(.segmented).labelsHidden()

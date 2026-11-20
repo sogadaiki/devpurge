@@ -222,7 +222,7 @@ struct ProjectIndexView: View {
             let decision = model.checks[entry.path]?.result.decision ?? entry.decision
             let phrase = query.trimmingCharacters(in: .whitespacesAndNewlines)
             let matches = phrase.isEmpty || [entry.path, entry.owner, entry.reason, entry.until ?? "", entry.keeper ?? "",
-                                              IndexRole(rawValue: entry.role)?.label ?? ""].contains { $0.localizedCaseInsensitiveContains(phrase) }
+                                              IndexRole(rawValue: entry.role)?.label ?? "", entry.backupLabel].contains { $0.localizedCaseInsensitiveContains(phrase) }
             guard matches else { return false }
             switch filter {
             case .all: return true
@@ -279,6 +279,8 @@ struct ProjectIndexView: View {
             HStack {
                 Text(checked.map { "照合 " + $0.date.formatted(date: .omitted, time: .standard) } ?? (entry.recorded ? "記録済み" : "未登録"))
                     .font(.caption).foregroundStyle(.secondary)
+                Text(entry.backupLabel).font(.caption)
+                    .help("この項目に適用されるTime Machineの現在の設定です。フォルダ内の項目には個別の除外設定が適用されることがあります。")
                 Spacer()
                 if entry.recorded && entry.role == "copy" && !(entry.keeper ?? "").isEmpty {
                     Button("原本と照合") { model.verify(entry) }

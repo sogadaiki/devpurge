@@ -18,10 +18,19 @@ struct DataIndexEntry: Decodable, Identifiable {
     var until: String?
     var recorded = false
     var version: String? = "new"
+    var backupInclusion: String?
     var id: String { path }
 
+    var backupLabel: String {
+        switch backupInclusion {
+        case "included": return "バックアップ対象"
+        case "excluded": return "バックアップ対象外"
+        default: return "バックアップ対象は未確認"
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
-        case path, role, owner, reason, decision, detail, keeper, rebuild, until, recorded
+        case path, role, owner, reason, decision, detail, keeper, rebuild, until, recorded, backupInclusion
         case version = "revision"
     }
 }

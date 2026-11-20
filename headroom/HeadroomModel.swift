@@ -10,6 +10,7 @@ final class HeadroomModel: ObservableObject {
         didSet { UserDefaults.standard.set(page.rawValue, forKey: "dashboardArea") }
     }
     @Published private(set) var vitals = Vitals.read()
+    let backup = BackupMonitor(history: { BackupHistory.run(for: $0) })
     @Published private(set) var groups = [DiskGroup]()
     @Published private(set) var apps = [MemoryApp]()
     @Published private(set) var project: URL?
@@ -27,7 +28,10 @@ final class HeadroomModel: ObservableObject {
     private let baseline = Baselines()
     private let queue = DispatchQueue(label: "jp.devpurge.headroom.scan", qos: .utility)
 
-    func tick() { vitals = Vitals.read() }
+    func tick() {
+        vitals = Vitals.read()
+        backup.refresh(freeBytes: vitals.diskFree)
+    }
 
     func loadPage() {
         guard busy.isEmpty else { return }
